@@ -46,34 +46,14 @@ active_allocations = {}
 seen_messages = set()
 MAX_SEEN_SIZE = 5000
 
-# Default fallbacks if database is empty
+# Fallback default ranges if database is empty
 DEFAULT_RANGES = [
-    {"id": 1, "service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
-    {"id": 2, "service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
+    {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
+    {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
 
 
 # --- Database Helper Functions ---
-
-def db_register_user(chat_id: int, first_name: str):
-    if not supabase:
-        return
-    try:
-        supabase.table("bot_users").upsert({"chat_id": chat_id, "first_name": first_name}, on_conflict="chat_id").execute()
-    except Exception as e:
-        logging.error(f"Error registering user: {e}")
-
-
-def db_get_all_users() -> list:
-    if not supabase:
-        return []
-    try:
-        res = supabase.table("bot_users").select("chat_id").execute()
-        return [r["chat_id"] for r in res.data]
-    except Exception as e:
-        logging.error(f"Error fetching users: {e}")
-        return []
-
 
 def db_get_managed_ranges() -> list:
     if not supabase:
@@ -103,15 +83,6 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         logging.error(f"Error inserting range to Supabase: {e}")
 
 
-def db_delete_range_by_id(range_id: int):
-    if not supabase:
-        return
-    try:
-        supabase.table("managed_ranges").delete().eq("id", range_id).execute()
-    except Exception as e:
-        logging.error(f"Error deleting range from Supabase: {e}")
-
-
 def db_clear_managed_ranges():
     if not supabase:
         return
@@ -121,7 +92,7 @@ def db_clear_managed_ranges():
         logging.error(f"Error clearing ranges from Supabase: {e}")
 
 
-# --- Comprehensive Country Flag & Code Mapping ---
+# --- Comprehensive World Country & Flag Map ---
 COUNTRY_FLAG_MAP = {
     # Africa
     "algeria": ("Algeria", "🇩🇿"), "213": ("Algeria", "🇩🇿"),
@@ -136,7 +107,7 @@ COUNTRY_FLAG_MAP = {
     "chad": ("Chad", "🇹🇩"), "235": ("Chad", "🇹🇩"),
     "comoros": ("Comoros", "🇰🇲"), "269": ("Comoros", "🇰🇲"),
     "congo": ("Congo", "🇨🇬"), "242": ("Congo", "🇨🇬"),
-    "dr congo": ("DR Congo", "🇨🇩"), "drc": ("DR Congo", "🇨🇩"), "243": ("DR Congo", "🇨🇩"),
+    "dr congo": ("DR Congo", "🇨🇩"), "243": ("DR Congo", "🇨🇩"),
     "djibouti": ("Djibouti", "🇩🇯"), "253": ("Djibouti", "🇩🇯"),
     "egypt": ("Egypt", "🇪🇬"), "20": ("Egypt", "🇪🇬"),
     "equatorial guinea": ("Equatorial Guinea", "🇬🇶"), "240": ("Equatorial Guinea", "🇬🇶"),
@@ -164,7 +135,7 @@ COUNTRY_FLAG_MAP = {
     "niger": ("Niger", "🇳🇪"), "227": ("Niger", "🇳🇪"),
     "nigeria": ("Nigeria", "🇳🇬"), "234": ("Nigeria", "🇳🇬"),
     "rwanda": ("Rwanda", "🇷🇼"), "250": ("Rwanda", "🇷🇼"),
-    "sao tome and principe": ("Sao Tome and Principe", "🇸🇹"), "239": ("Sao Tome and Principe", "🇸🇹"),
+    "sao tome": ("Sao Tome and Principe", "🇸🇹"), "239": ("Sao Tome and Principe", "🇸🇹"),
     "senegal": ("Senegal", "🇸🇳"), "221": ("Senegal", "🇸🇳"),
     "seychelles": ("Seychelles", "🇸🇨"), "248": ("Seychelles", "🇸🇨"),
     "sierra leone": ("Sierra Leone", "🇸🇱"), "232": ("Sierra Leone", "🇸🇱"),
@@ -189,6 +160,7 @@ COUNTRY_FLAG_MAP = {
     "brunei": ("Brunei", "🇧🇳"), "673": ("Brunei", "🇧🇳"),
     "cambodia": ("Cambodia", "🇰🇭"), "855": ("Cambodia", "🇰🇭"),
     "china": ("China", "🇨🇳"), "86": ("China", "🇨🇳"),
+    "cyprus": ("Cyprus", "🇨🇾"), "357": ("Cyprus", "🇨🇾"),
     "georgia": ("Georgia", "🇬🇪"), "995": ("Georgia", "🇬🇪"),
     "hong kong": ("Hong Kong", "🇭🇰"), "852": ("Hong Kong", "🇭🇰"),
     "india": ("India", "🇮🇳"), "91": ("India", "🇮🇳"),
@@ -215,7 +187,7 @@ COUNTRY_FLAG_MAP = {
     "palestine": ("Palestine", "🇵🇸"), "970": ("Palestine", "🇵🇸"),
     "philippines": ("Philippines", "🇵🇭"), "63": ("Philippines", "🇵🇭"),
     "qatar": ("Qatar", "🇶🇦"), "974": ("Qatar", "🇶🇦"),
-    "saudi arabia": ("Saudi Arabia", "🇸🇦"), "ksa": ("Saudi Arabia", "🇸🇦"), "966": ("Saudi Arabia", "🇸🇦"),
+    "saudi arabia": ("Saudi Arabia", "🇸🇦"), "966": ("Saudi Arabia", "🇸🇦"),
     "singapore": ("Singapore", "🇸🇬"), "65": ("Singapore", "🇸🇬"),
     "south korea": ("South Korea", "🇰🇷"), "korea": ("South Korea", "🇰🇷"), "82": ("South Korea", "🇰🇷"),
     "sri lanka": ("Sri Lanka", "🇱🇰"), "94": ("Sri Lanka", "🇱🇰"),
@@ -226,7 +198,7 @@ COUNTRY_FLAG_MAP = {
     "timor-leste": ("Timor-Leste", "🇹🇱"), "670": ("Timor-Leste", "🇹🇱"),
     "turkey": ("Turkey", "🇹🇷"), "turkiye": ("Turkey", "🇹🇷"), "90": ("Turkey", "🇹🇷"),
     "turkmenistan": ("Turkmenistan", "🇹🇲"), "993": ("Turkmenistan", "🇹🇲"),
-    "uae": ("United Arab Emirates", "🇦🇪"), "dubai": ("United Arab Emirates", "🇦🇪"), "971": ("United Arab Emirates", "🇦🇪"),
+    "uae": ("United Arab Emirates", "🇦🇪"), "united arab emirates": ("United Arab Emirates", "🇦🇪"), "971": ("United Arab Emirates", "🇦🇪"),
     "uzbekistan": ("Uzbekistan", "🇺🇿"), "998": ("Uzbekistan", "🇺🇿"),
     "vietnam": ("Vietnam", "🇻🇳"), "84": ("Vietnam", "🇻🇳"),
     "yemen": ("Yemen", "🇾🇪"), "967": ("Yemen", "🇾🇪"),
@@ -240,8 +212,7 @@ COUNTRY_FLAG_MAP = {
     "bosnia": ("Bosnia and Herzegovina", "🇧🇦"), "387": ("Bosnia and Herzegovina", "🇧🇦"),
     "bulgaria": ("Bulgaria", "🇧🇬"), "359": ("Bulgaria", "🇧🇬"),
     "croatia": ("Croatia", "🇭🇷"), "385": ("Croatia", "🇭🇷"),
-    "cyprus": ("Cyprus", "🇨🇾"), "357": ("Cyprus", "🇨🇾"),
-    "czechia": ("Czech Republic", "🇨🇿"), "czech": ("Czech Republic", "🇨🇿"), "420": ("Czech Republic", "🇨🇿"),
+    "czech republic": ("Czech Republic", "🇨🇿"), "czechia": ("Czech Republic", "🇨🇿"), "420": ("Czech Republic", "🇨🇿"),
     "denmark": ("Denmark", "🇩🇰"), "45": ("Denmark", "🇩🇰"),
     "estonia": ("Estonia", "🇪🇪"), "372": ("Estonia", "🇪🇪"),
     "finland": ("Finland", "🇫🇮"), "358": ("Finland", "🇫🇮"),
@@ -261,8 +232,8 @@ COUNTRY_FLAG_MAP = {
     "moldova": ("Moldova", "🇲🇩"), "373": ("Moldova", "🇲🇩"),
     "monaco": ("Monaco", "🇲🇨"), "377": ("Monaco", "🇲🇨"),
     "montenegro": ("Montenegro", "🇲🇪"), "382": ("Montenegro", "🇲🇪"),
-    "netherlands": ("Netherlands", "🇳🇱"), "holland": ("Netherlands", "🇳🇱"), "31": ("Netherlands", "🇳🇱"),
-    "north macedonia": ("North Macedonia", "🇲🇰"), "macedonia": ("North Macedonia", "🇲🇰"), "389": ("North Macedonia", "🇲🇰"),
+    "netherlands": ("Netherlands", "🇳🇱"), "31": ("Netherlands", "🇳🇱"),
+    "north macedonia": ("North Macedonia", "🇲🇰"), "389": ("North Macedonia", "🇲🇰"),
     "norway": ("Norway", "🇳🇴"), "47": ("Norway", "🇳🇴"),
     "poland": ("Poland", "🇵🇱"), "48": ("Poland", "🇵🇱"),
     "portugal": ("Portugal", "🇵🇹"), "351": ("Portugal", "🇵🇹"),
@@ -276,7 +247,7 @@ COUNTRY_FLAG_MAP = {
     "sweden": ("Sweden", "🇸🇪"), "46": ("Sweden", "🇸🇪"),
     "switzerland": ("Switzerland", "🇨🇭"), "41": ("Switzerland", "🇨🇭"),
     "ukraine": ("Ukraine", "🇺🇦"), "380": ("Ukraine", "🇺🇦"),
-    "uk": ("United Kingdom", "🇬🇧"), "united kingdom": ("United Kingdom", "🇬🇧"), "england": ("United Kingdom", "🇬🇧"), "44": ("United Kingdom", "🇬🇧"),
+    "uk": ("United Kingdom", "🇬🇧"), "united kingdom": ("United Kingdom", "🇬🇧"), "44": ("United Kingdom", "🇬🇧"),
     "vatican": ("Vatican City", "🇻🇦"), "379": ("Vatican City", "🇻🇦"),
 
     # Americas
@@ -286,14 +257,16 @@ COUNTRY_FLAG_MAP = {
     "belize": ("Belize", "🇧🇿"), "501": ("Belize", "🇧🇿"),
     "bolivia": ("Bolivia", "🇧🇴"), "591": ("Bolivia", "🇧🇴"),
     "brazil": ("Brazil", "🇧🇷"), "55": ("Brazil", "🇧🇷"),
-    "canada": ("Canada", "🇨🇦"), "1": ("North America", "🇺🇸"),
+    "canada": ("Canada", "🇨🇦"), "1": ("Canada", "🇨🇦"),
     "chile": ("Chile", "🇨🇱"), "56": ("Chile", "🇨🇱"),
     "colombia": ("Colombia", "🇨🇴"), "57": ("Colombia", "🇨🇴"),
     "costa rica": ("Costa Rica", "🇨🇷"), "506": ("Costa Rica", "🇨🇷"),
     "cuba": ("Cuba", "🇨🇺"), "53": ("Cuba", "🇨🇺"),
+    "dominica": ("Dominica", "🇩🇲"), "1767": ("Dominica", "🇩🇲"),
     "dominican republic": ("Dominican Republic", "🇩🇴"), "1809": ("Dominican Republic", "🇩🇴"),
     "ecuador": ("Ecuador", "🇪🇨"), "593": ("Ecuador", "🇪🇨"),
     "el salvador": ("El Salvador", "🇸🇻"), "503": ("El Salvador", "🇸🇻"),
+    "grenada": ("Grenada", "🇬🇩"), "1473": ("Grenada", "🇬🇩"),
     "guatemala": ("Guatemala", "🇬🇹"), "502": ("Guatemala", "🇬🇹"),
     "guyana": ("Guyana", "🇬🇾"), "592": ("Guyana", "🇬🇾"),
     "haiti": ("Haiti", "🇭🇹"), "509": ("Haiti", "🇭🇹"),
@@ -313,9 +286,18 @@ COUNTRY_FLAG_MAP = {
     # Oceania
     "australia": ("Australia", "🇦🇺"), "61": ("Australia", "🇦🇺"),
     "fiji": ("Fiji", "🇫🇯"), "679": ("Fiji", "🇫🇯"),
+    "kiribati": ("Kiribati", "🇰🇮"), "686": ("Kiribati", "🇰🇮"),
+    "marshall islands": ("Marshall Islands", "🇲🇭"), "692": ("Marshall Islands", "🇲🇭"),
+    "micronesia": ("Micronesia", "🇫🇲"), "691": ("Micronesia", "🇫🇲"),
+    "nauru": ("Nauru", "🇳🇷"), "674": ("Nauru", "🇳🇷"),
     "new zealand": ("New Zealand", "🇳🇿"), "64": ("New Zealand", "🇳🇿"),
+    "palau": ("Palau", "🇵🇼"), "680": ("Palau", "🇵🇼"),
     "papua new guinea": ("Papua New Guinea", "🇵🇬"), "675": ("Papua New Guinea", "🇵🇬"),
     "samoa": ("Samoa", "🇼🇸"), "685": ("Samoa", "🇼🇸"),
+    "solomon islands": ("Solomon Islands", "🇸🇧"), "677": ("Solomon Islands", "🇸🇧"),
+    "tonga": ("Tonga", "🇹🇴"), "676": ("Tonga", "🇹🇴"),
+    "tuvalu": ("Tuvalu", "🇹🇻"), "688": ("Tuvalu", "🇹🇻"),
+    "vanuatu": ("Vanuatu", "🇻🇺"), "678": ("Vanuatu", "🇻🇺"),
 }
 
 
@@ -330,7 +312,9 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
 def mask_phone_number(phone: str) -> str:
     digits = re.sub(r"\D", "", phone)
     if len(digits) >= 8:
-        return f"+{digits[:3]}****{digits[-4:]}"
+        prefix = digits[:3]
+        suffix = digits[-4:]
+        return f"+{prefix}****{suffix}"
     return phone
 
 
@@ -342,7 +326,10 @@ def extract_code(message_text: str) -> str:
 class ZebraSMSClient:
     def __init__(self, api_key: str):
         self.base_url = ZEBRA_BASE_URL
-        self.headers = {"MAuth": api_key, "Content-Type": "application/json"}
+        self.headers = {
+            "MAuth": api_key,
+            "Content-Type": "application/json",
+        }
 
     async def get_number(self, range_val: str) -> dict:
         async with httpx.AsyncClient() as client:
@@ -369,8 +356,122 @@ class ZebraSMSClient:
             except Exception as e:
                 return {"meta": {"code": -500, "error": str(e)}}
 
+    async def get_live_access(self, sender: str = None) -> dict:
+        params = {"sender": sender} if sender else {}
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/publicapi/liveaccess",
+                    headers=self.headers,
+                    params=params,
+                    timeout=10.0,
+                )
+                return response.json()
+            except Exception as e:
+                return {"meta": {"code": -500, "error": str(e)}}
+
 
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
+
+
+async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    dummy_number = "+237628503546"
+    dummy_sender = "FACEBOOK"
+    dummy_message = "<#> 40921 is your Facebook code Laz+nxCarLW"
+    country_name, flag_icon = auto_detect_country_and_flag("Cameroon", dummy_number)
+
+    code = extract_code(dummy_message)
+    masked_num = mask_phone_number(dummy_number)
+
+    dm_text = (
+        "📩 *[TEST] Verification Code Received!*\n\n"
+        f"📱 *To Number:* `{dummy_number}`\n"
+        f"👤 *Sender:* `{dummy_sender}`\n"
+        f"🔑 *Code:* `{code}`"
+    )
+    await update.message.reply_text(dm_text, parse_mode="Markdown")
+
+    if CHANNEL_CHAT_ID:
+        channel_text = (
+            "📢 *New SMS Received*\n\n"
+            f"📱 *To Number:* `{masked_num}`\n"
+            f"{flag_icon} *Country:* {country_name}\n"
+            f"👤 *Sender:* `{dummy_sender}`\n"
+            f"💬 *Full Message:* `{dummy_message}`"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=CHANNEL_CHAT_ID,
+                text=channel_text,
+                parse_mode="Markdown",
+            )
+            await update.message.reply_text("✅ Test message successfully sent to Channel!")
+        except Exception as err:
+            await update.message.reply_text(f"❌ Failed to send to Channel: `{err}`", parse_mode="Markdown")
+
+
+async def auto_check_updates(app):
+    while True:
+        try:
+            if active_allocations:
+                res = await zebra.get_updates()
+                meta = res.get("meta", {})
+
+                if meta.get("code") == 0:
+                    rows = res.get("data", {}).get("rows", [])
+                    for row in rows:
+                        target_number = row.get("number")
+                        timestamp = row.get("at_ms")
+                        msg_text = row.get("message")
+                        sender = row.get("sender")
+
+                        msg_id = f"{target_number}_{timestamp}_{msg_text}"
+
+                        if len(seen_messages) > MAX_SEEN_SIZE:
+                            seen_messages.clear()
+
+                        if msg_id not in seen_messages and target_number in active_allocations:
+                            seen_messages.add(msg_id)
+                            allocation_info = active_allocations[target_number]
+                            user_chat_id = allocation_info["chat_id"]
+                            country_name = allocation_info["country"]
+                            flag_icon = allocation_info["flag"]
+                            
+                            code = extract_code(msg_text)
+                            masked_num = mask_phone_number(target_number)
+
+                            dm_text = (
+                                "📩 *Verification Code Received!*\n\n"
+                                f"📱 *To Number:* `{target_number}`\n"
+                                f"👤 *Sender:* `{sender}`\n"
+                                f"🔑 *Code:* `{code}`"
+                            )
+                            await app.bot.send_message(
+                                chat_id=user_chat_id,
+                                text=dm_text,
+                                parse_mode="Markdown",
+                            )
+
+                            if CHANNEL_CHAT_ID:
+                                channel_text = (
+                                    "📢 *New SMS Received*\n\n"
+                                    f"📱 *To Number:* `{masked_num}`\n"
+                                    f"{flag_icon} *Country:* {country_name}\n"
+                                    f"👤 *Sender:* `{sender}`\n"
+                                    f"💬 *Full Message:* `{msg_text}`"
+                                )
+                                try:
+                                    await app.bot.send_message(
+                                        chat_id=CHANNEL_CHAT_ID,
+                                        text=channel_text,
+                                        parse_mode="Markdown",
+                                    )
+                                except Exception as err:
+                                    logging.error(f"Failed to post to channel: {err}")
+        except Exception as e:
+            logging.error(f"Error during auto-polling: {e}")
+
+        await asyncio.sleep(2)
 
 
 def get_main_keyboard():
@@ -382,18 +483,20 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-# --- Admin Handlers ---
-
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
     if ADMIN_ID != 0 and user_id != ADMIN_ID:
-        await update.message.reply_text(f"⛔ **Access Denied:** ID `{user_id}` is not admin.", parse_mode="Markdown")
+        await update.message.reply_text(f"⛔ **Access Denied:** Your Telegram ID `{user_id}` is not configured as admin.", parse_mode="Markdown")
         return
 
     managed_ranges = db_get_managed_ranges()
 
     ranges_text = "\n".join(
-        [f"• {r['flag']} 🔹 **[{r['service']}]** {r['country']} (`{r['range']}`)" for r in managed_ranges]
+        [
+            f"• {r['flag']} 🔹 **[{r['service']}]** {r['country']} (`{r['range']}`)"
+            for r in managed_ranges
+        ]
     ) or "No active ranges configured."
 
     admin_msg = (
@@ -403,11 +506,15 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = [
-        [InlineKeyboardButton("➕ Add Range", callback_data="admin_add"), InlineKeyboardButton("🗑 Delete Specific Range", callback_data="admin_delete_list")],
-        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast"), InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear")],
+        [
+            InlineKeyboardButton("➕ Add Range", callback_data="admin_add"),
+            InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear"),
+        ]
     ]
 
-    await update.message.reply_text(admin_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        admin_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -415,149 +522,272 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     user_id = query.from_user.id
 
     if ADMIN_ID != 0 and user_id != ADMIN_ID:
-        await query.answer("Unauthorized.", show_alert=True)
+        await query.answer("Unauthorized action.", show_alert=True)
         return
 
     data = query.data
-
     if data == "admin_add":
         await query.answer()
         context.user_data["waiting_for_range"] = True
         await query.message.reply_text(
-            "✍ **Send the new range in this format:**\n\n"
+            "✍ **Send the configuration in this format:**\n\n"
             "`Service | Country | Range`\n\n"
-            "👉 *Example:* `Facebook | Ivory Coast | 225072XXX`",
+            "👉 *Example:* `Facebook | Cambodia | 85531879XXX`",
             parse_mode="Markdown",
         )
+    elif data == "admin_clear":
+        db_clear_managed_ranges()
+        await query.answer("All ranges cleared from database!", show_alert=True)
+        await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
 
-    elif data == "admin_delete_list":
-        await query.answer()
-        managed_ranges = db_get_managed_ranges()
-        if not managed_ranges:
-            await query.message.reply_text("⚠️ No ranges available to delete.")
-            return
+
+async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    chat_id = query.message.chat_id
+    managed_ranges = db_get_managed_ranges()
+
+    if data.startswith("srv_"):
+        selected_service = data.replace("srv_", "")
+        matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
 
         keyboard = [
-            [InlineKeyboardButton(f"❌ {r['service']} - {r['country']} ({r['range']})", callback_data=f"del_range_{r.get('id', r['range'])}")]
-            for r in managed_ranges
+            [
+                InlineKeyboardButton(
+                    f"{r['flag']} {r['country']} ({r['range']})",
+                    callback_data=f"prov_{r['range']}",
+                )
+            ]
+            for r in matching_ranges
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="admin_back")])
 
         await query.edit_message_text(
-            "🗑 **Select a specific range to delete:**",
+            f"🛠 **Selected Service:** `{selected_service}`\n\n"
+            f"👇 **Select Country / Range to allocate your number:**",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
-    elif data.startswith("del_range_"):
+    elif data.startswith("prov_") or data.startswith("change_"):
         await query.answer()
-        target_id = data.replace("del_range_", "")
-        if target_id.isdigit():
-            db_delete_range_by_id(int(target_id))
         
-        await query.edit_message_text("✅ **Range deleted successfully!** Use `/admin` to refresh.")
-
-    elif data == "admin_broadcast":
-        await query.answer()
-        context.user_data["waiting_for_broadcast"] = True
-        await query.message.reply_text(
-            "📢 **Send the message you want to broadcast.**\n\n"
-            "It will be sent to all bot users and posted directly to your OTP channel!",
-            parse_mode="Markdown",
+        is_change_request = data.startswith("change_")
+        selected_range = data.replace("prov_", "").replace("change_", "")
+        matched_item = next((r for r in managed_ranges if r["range"] == selected_range), {})
+        
+        c_name, flag_icon = auto_detect_country_and_flag(
+            matched_item.get("country", ""), selected_range
         )
 
-    elif data == "admin_clear":
-        db_clear_managed_ranges()
-        await query.answer("All ranges cleared!", show_alert=True)
-        await query.edit_message_text("🗑 **All configured ranges have been cleared.**")
+        if is_change_request:
+            try:
+                await query.message.delete()
+            except Exception as e:
+                logging.warning(f"Could not delete old message: {e}")
 
-    elif data == "admin_back":
-        await cmd_admin(update, context)
+            loading_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⏳ Requesting new number for {flag_icon} range `{selected_range}`...",
+                parse_mode="Markdown",
+            )
+        else:
+            await query.edit_message_text(
+                f"⏳ Requesting number for {flag_icon} range `{selected_range}`..."
+            )
 
+        res = await zebra.get_number(selected_range)
+        meta = res.get("meta", {})
 
-# --- User Handlers ---
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated_num = row.get("number")
+            
+            res_country = row.get("country") or c_name
+            final_country_name, final_flag = auto_detect_country_and_flag(res_country, allocated_num)
+
+            active_allocations[allocated_num] = {
+                "chat_id": chat_id,
+                "country": final_country_name,
+                "flag": final_flag,
+            }
+
+            msg = (
+                f"✅ **Number Allocated Successfully!**\n\n"
+                f"📱 **Number:** `{allocated_num}`\n"
+                f"{final_flag} **Country:** {final_country_name}"
+            )
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🔄 Change Number", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)],
+                ]
+            )
+
+            if is_change_request:
+                await loading_msg.edit_text(
+                    msg, parse_mode="Markdown", reply_markup=keyboard
+                )
+            else:
+                await query.edit_message_text(
+                    msg, parse_mode="Markdown", reply_markup=keyboard
+                )
+        else:
+            err_msg = res.get("message") or meta.get("error") or "Unknown error"
+            msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
+            
+            if is_change_request:
+                await loading_msg.edit_text(msg, parse_mode="Markdown")
+            else:
+                await query.edit_message_text(msg, parse_mode="Markdown")
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    db_register_user(user.id, user.first_name)
-
+    user_name = update.effective_user.first_name or "User"
+    
     welcome_msg = (
         f"👋 *ANU PREMIUM OTP BOT*\n\n"
-        f"Welcome, *{user.first_name}*!\n\n"
+        f"Welcome, *{user_name}*! 👋\n\n"
         f"Need help or want to add a working number? Contact support: {SUPPORT_USERNAME}"
     )
-    await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await update.message.reply_text(
+        welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard()
+    )
 
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    user_id = update.effective_user.id
+    user_chat_id = update.effective_chat.id
 
-    # 1. Handle Admin Adding Range
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
-            await update.message.reply_text("⚠️ **Format Error!** Use: `Service | Country | Range`", parse_mode="Markdown")
+            await update.message.reply_text(
+                "⚠️ **Format Error!** Use: `Service | Country | Range`\n"
+                "Example: `Facebook | Cambodia | 85531879XXX`",
+                parse_mode="Markdown",
+            )
             return
 
         parts = [p.strip() for p in text.split("|")]
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
+        # Save directly to Supabase database
         db_add_managed_range(service, c_name, detected_flag, range_val)
+        
         context.user_data["waiting_for_range"] = False
 
-        await update.message.reply_text(f"✅ **Saved Range:** `{service}` | `{c_name}` | `{range_val}`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"✅ **Successfully saved range to database!**\n"
+            f"📌 **Service:** `{service}`\n"
+            f"{detected_flag} **Country:** `{c_name}`\n"
+            f"🔢 **Range:** `{range_val}`",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(),
+        )
         return
 
-    # 2. Handle Admin Broadcasting Message
-    if context.user_data.get("waiting_for_broadcast"):
-        context.user_data["waiting_for_broadcast"] = False
-        broadcast_text = f"📢 **ANNOUNCEMENT**\n\n{text}"
-        
-        # Send to OTP Channel
-        if CHANNEL_CHAT_ID:
-            try:
-                await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=broadcast_text, parse_mode="Markdown")
-            except Exception as e:
-                logging.error(f"Failed to broadcast to channel: {e}")
-
-        # Send to Users
-        user_ids = db_get_all_users()
-        success_count = 0
-        for u_id in user_ids:
-            try:
-                await context.bot.send_message(chat_id=u_id, text=broadcast_text, parse_mode="Markdown")
-                success_count += 1
-                await asyncio.sleep(0.05)  # Rate limiting
-            except Exception:
-                pass
-
-        await update.message.reply_text(f"✅ **Broadcast Sent!** Delivered to {success_count} users and the channel.")
-        return
-
-    # 3. Handle Main Menu Options
     if "Get Number" in text:
         managed_ranges = db_get_managed_ranges()
+
         if not managed_ranges:
-            await update.message.reply_text("⚠️ No ranges available.", reply_markup=get_main_keyboard())
+            await update.message.reply_text(
+                "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                reply_markup=get_main_keyboard(),
+            )
             return
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
-        keyboard = [[InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")] for srv in services]
-        await update.message.reply_text("🛠 **Select a Service:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [
+            [InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")]
+            for srv in services
+        ]
+
+        await update.message.reply_text(
+            "🛠 **Select a Service:**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    elif "Active Engine" in text:
+        await update.message.reply_text("⏳ Fetching active delivery engines...")
+        res = await zebra.get_live_access()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "⚡ **Zebra Active Delivery Engines:**\n\n" + "\n".join(
+                [f"• 👤 **Sender:** `{r.get('sender')}` | **Ranges:** {', '.join([f'`{x}`' for x in r.get('ranges', [])])}" for r in rows[:10]]
+            ) if rows else "🔍 No active engines found right now."
+        else:
+            reply = f"❌ Error checking active engines: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Live Feed" in text:
+        await update.message.reply_text("⏳ Fetching live delivered SMS feeds...")
+        res = await zebra.get_updates()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "🌐 **Live Updates Feed (Recent 5):**\n\n" + "\n\n".join(
+                [f"• 📱 `{mask_phone_number(r.get('number'))}` | 👤 `{r.get('sender')}`\n  💬 `{r.get('message')}`" for r in rows[:5]]
+            ) if rows else "📭 No live updates received recently."
+        else:
+            reply = f"❌ Error fetching feed: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Referrals" in text:
+        bot_username = (await context.bot.get_me()).username
+        await update.message.reply_text(
+            f"🎁 **Referral System**\n\n"
+            f"Share your referral link with friends:\n🔗 `https://t.me/{bot_username}?start={user_chat_id}`",
+            parse_mode="Markdown",
+        )
+
+    elif "My Profile" in text:
+        user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
+        nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
+        await update.message.reply_text(
+            f"👤 **User Profile**\n\n"
+            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
+            f"📱 **Active Numbers:**\n{nums_text}",
+            parse_mode="Markdown",
+        )
+
+    elif "Support Hub" in text:
+        await update.message.reply_text(
+            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
+            parse_mode="Markdown",
+        )
 
 
 async def post_init(application):
-    pass
+    application.create_task(auto_check_updates(application))
 
+
+# --- Main Execution ---
 
 if __name__ == "__main__":
     keep_alive()
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+    print("Keep-alive HTTP server started.")
+
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|del_range_)"))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
     print("🤖 Bot running...")
