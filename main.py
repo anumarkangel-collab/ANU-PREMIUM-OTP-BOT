@@ -4,6 +4,7 @@ import os
 import re
 import httpx
 from keep_alive import keep_alive
+from supabase import create_client, Client
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -29,6 +30,12 @@ ZEBRA_API_KEY = os.getenv("ZEBRA_API_KEY")
 ZEBRA_BASE_URL = os.getenv("ZEBRA_BASE_URL", "https://api.zebrasms.com/api/v1")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@anstans")
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Initialize Supabase Client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -37,12 +44,53 @@ logging.basicConfig(
 # --- Global State ---
 active_allocations = {}
 seen_messages = set()
-MAX_SEEN_SIZE = 5000  # Cap memory usage by preventing infinite growth of seen IDs
+MAX_SEEN_SIZE = 5000
 
-MANAGED_RANGES = [
+# Fallback default ranges if database is empty
+DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
+
+
+# --- Database Helper Functions ---
+
+def db_get_managed_ranges() -> list:
+    if not supabase:
+        return DEFAULT_RANGES
+    try:
+        response = supabase.table("managed_ranges").select("*").execute()
+        if response.data:
+            return response.data
+        return DEFAULT_RANGES
+    except Exception as e:
+        logging.error(f"Error fetching ranges from Supabase: {e}")
+        return DEFAULT_RANGES
+
+
+def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
+    if not supabase:
+        return
+    try:
+        data = {
+            "service": service,
+            "country": country,
+            "flag": flag,
+            "range": range_val,
+        }
+        supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
+    except Exception as e:
+        logging.error(f"Error inserting range to Supabase: {e}")
+
+
+def db_clear_managed_ranges():
+    if not supabase:
+        return
+    try:
+        supabase.table("managed_ranges").delete().neq("id", 0).execute()
+    except Exception as e:
+        logging.error(f"Error clearing ranges from Supabase: {e}")
+
 
 # --- Comprehensive World Country & Flag Map ---
 COUNTRY_FLAG_MAP = {
@@ -377,14 +425,11 @@ async def auto_check_updates(app):
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        # Generate unique identifier for deduplication
                         msg_id = f"{target_number}_{timestamp}_{msg_text}"
 
-                        # Prevent set memory overflow
                         if len(seen_messages) > MAX_SEEN_SIZE:
                             seen_messages.clear()
 
-                        # Check if message has already been sent to DM/Channel
                         if msg_id not in seen_messages and target_number in active_allocations:
                             seen_messages.add(msg_id)
                             allocation_info = active_allocations[target_number]
@@ -395,7 +440,6 @@ async def auto_check_updates(app):
                             code = extract_code(msg_text)
                             masked_num = mask_phone_number(target_number)
 
-                            # 1. Direct Message to User
                             dm_text = (
                                 "📩 *Verification Code Received!*\n\n"
                                 f"📱 *To Number:* `{target_number}`\n"
@@ -408,7 +452,6 @@ async def auto_check_updates(app):
                                 parse_mode="Markdown",
                             )
 
-                            # 2. Public Channel Broadcast
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
                                     "📢 *New SMS Received*\n\n"
@@ -447,16 +490,18 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⛔ **Access Denied:** Your Telegram ID `{user_id}` is not configured as admin.", parse_mode="Markdown")
         return
 
+    managed_ranges = db_get_managed_ranges()
+
     ranges_text = "\n".join(
         [
             f"• {r['flag']} 🔹 **[{r['service']}]** {r['country']} (`{r['range']}`)"
-            for r in MANAGED_RANGES
+            for r in managed_ranges
         ]
     ) or "No active ranges configured."
 
     admin_msg = (
         f"🛠 **Admin Configuration Panel** 🛠\n\n"
-        f"📋 **Current Active Ranges:**\n{ranges_text}\n\n"
+        f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
         f"👇 *Click below to add or manage ranges:*"
     )
 
@@ -491,20 +536,20 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode="Markdown",
         )
     elif data == "admin_clear":
-        global MANAGED_RANGES
-        MANAGED_RANGES = []
-        await query.answer("All ranges cleared!", show_alert=True)
-        await query.edit_message_text("🗑 **All configured ranges have been cleared.**")
+        db_clear_managed_ranges()
+        await query.answer("All ranges cleared from database!", show_alert=True)
+        await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
 
 
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
+    managed_ranges = db_get_managed_ranges()
 
     if data.startswith("srv_"):
         selected_service = data.replace("srv_", "")
-        matching_ranges = [r for r in MANAGED_RANGES if r["service"] == selected_service]
+        matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
 
         keyboard = [
             [
@@ -528,7 +573,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         
         is_change_request = data.startswith("change_")
         selected_range = data.replace("prov_", "").replace("change_", "")
-        matched_item = next((r for r in MANAGED_RANGES if r["range"] == selected_range), {})
+        matched_item = next((r for r in managed_ranges if r["range"] == selected_range), {})
         
         c_name, flag_icon = auto_detect_country_and_flag(
             matched_item.get("country", ""), selected_range
@@ -627,18 +672,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
-        MANAGED_RANGES.append(
-            {
-                "service": service,
-                "country": c_name,
-                "flag": detected_flag,
-                "range": range_val,
-            }
-        )
+        # Save directly to Supabase database
+        db_add_managed_range(service, c_name, detected_flag, range_val)
+        
         context.user_data["waiting_for_range"] = False
 
         await update.message.reply_text(
-            f"✅ **Successfully added range!**\n"
+            f"✅ **Successfully saved range to database!**\n"
             f"📌 **Service:** `{service}`\n"
             f"{detected_flag} **Country:** `{c_name}`\n"
             f"🔢 **Range:** `{range_val}`",
@@ -648,14 +688,16 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if "Get Number" in text:
-        if not MANAGED_RANGES:
+        managed_ranges = db_get_managed_ranges()
+
+        if not managed_ranges:
             await update.message.reply_text(
                 "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
                 reply_markup=get_main_keyboard(),
             )
             return
 
-        services = sorted(list(set(r["service"] for r in MANAGED_RANGES)))
+        services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
             [InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")]
             for srv in services
