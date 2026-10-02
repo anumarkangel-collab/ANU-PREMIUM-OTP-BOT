@@ -37,6 +37,7 @@ logging.basicConfig(
 # --- Global State ---
 active_allocations = {}
 seen_messages = set()
+MAX_SEEN_SIZE = 5000  # Cap memory usage by preventing infinite growth of seen IDs
 
 MANAGED_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
@@ -376,8 +377,14 @@ async def auto_check_updates(app):
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
+                        # Generate unique identifier for deduplication
                         msg_id = f"{target_number}_{timestamp}_{msg_text}"
 
+                        # Prevent set memory overflow
+                        if len(seen_messages) > MAX_SEEN_SIZE:
+                            seen_messages.clear()
+
+                        # Check if message has already been sent to DM/Channel
                         if msg_id not in seen_messages and target_number in active_allocations:
                             seen_messages.add(msg_id)
                             allocation_info = active_allocations[target_number]
@@ -388,6 +395,7 @@ async def auto_check_updates(app):
                             code = extract_code(msg_text)
                             masked_num = mask_phone_number(target_number)
 
+                            # 1. Direct Message to User
                             dm_text = (
                                 "📩 *Verification Code Received!*\n\n"
                                 f"📱 *To Number:* `{target_number}`\n"
@@ -400,6 +408,7 @@ async def auto_check_updates(app):
                                 parse_mode="Markdown",
                             )
 
+                            # 2. Public Channel Broadcast
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
                                     "📢 *New SMS Received*\n\n"
