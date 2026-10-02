@@ -527,7 +527,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         managed_ranges = db_get_managed_ranges()
         if not managed_ranges:
-            await query.message.reply_text("⚠️ No ranges available to delete.")
+            await query.message.reply_text("⚠️️ No ranges available to delete.")
             return
 
         keyboard = [
@@ -568,6 +568,31 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await cmd_admin(update, context)
 
 
+async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if not data.startswith("srv_"):
+        return
+        
+    service_name = data.replace("srv_", "")
+    managed_ranges = db_get_managed_ranges()
+    
+    target_range = next((r for r in managed_ranges if r["service"].lower() == service_name.lower()), None)
+    
+    if not target_range:
+        await query.message.edit_text("❌ No range configured for this service.")
+        return
+        
+    range_val = target_range["range"]
+    await query.message.edit_text(f"⏳ Fetching number for <b>{service_name}</b> (Range: <code>{range_val}</code>)...", parse_mode="HTML")
+    
+    response = await zebra.get_number(range_val)
+    
+    await query.message.reply_text(f"📡 <b>API Response:</b>\n<pre>{response}</pre>", parse_mode="HTML", reply_markup=get_main_keyboard())
+
+
 # --- User Handlers ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -584,7 +609,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message.text else ""
-    user_id = update.effective_user.id
 
     # 1. Handle Admin Adding Range
     if context.user_data.get("waiting_for_range"):
@@ -632,21 +656,19 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_broadcast"] = False
         broadcast_text = f"📢 <b>ANNOUNCEMENT</b>\n\n{text}"
         
-        # Send to OTP Channel
         if CHANNEL_CHAT_ID:
             try:
                 await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=broadcast_text, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"Failed to broadcast to channel: {e}")
 
-        # Send to Users
         user_ids = db_get_all_users()
         success_count = 0
         for u_id in user_ids:
             try:
                 await context.bot.send_message(chat_id=u_id, text=broadcast_text, parse_mode="HTML")
                 success_count += 1
-                await asyncio.sleep(0.05)  # Rate limiting
+                await asyncio.sleep(0.05)
             except Exception:
                 pass
 
@@ -655,12 +677,16 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # 4. Handle Main Menu Options
     if "Get Number" in text:
+        # Clear leftover admin states to prevent input traps
+        context.user_data["waiting_for_range"] = False
+        context.user_data["waiting_for_emoji_update"] = False
+        context.user_data["waiting_for_broadcast"] = False
+        
         managed_ranges = db_get_managed_ranges()
         if not managed_ranges:
             await update.message.reply_text("⚠️ No ranges available.", reply_markup=get_main_keyboard())
             return
 
-        # Deduplicate services while retrieving custom emoji IDs
         services_map = {}
         for r in managed_ranges:
             srv = r["service"]
@@ -674,6 +700,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             keyboard.append([InlineKeyboardButton(f"{icon} {srv}", callback_data=f"srv_{srv}")])
 
         await update.message.reply_text("🛠 <b>Select a Service:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
 
 
 async def post_init(application):
@@ -689,6 +716,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("setemoji", set_emoji_command))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|del_range_)"))
+    app.add_handler(CallbackQueryHandler(service_callback_handler, pattern="^srv_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
     print("🤖 Bot running...")
