@@ -127,7 +127,9 @@ def db_set_custom_emoji(keyword: str, emoji_id: str, fallback: str):
 
 
 def get_dynamic_icon(keyword: str, default_fallback: str = "🔹") -> str:
-    """Resolves icon for any keyword (service name, flag name, flag symbol, etc.) dynamically."""
+    """Resolves icon for any keyword (service name, flag name, flag symbol, etc.) dynamically with smart fallbacks."""
+    if not keyword:
+        return default_fallback
     emojis_map = db_get_custom_emojis()
     key = keyword.lower().strip()
     if key in emojis_map:
@@ -223,10 +225,15 @@ COUNTRY_FLAG_MAP = {
 
 def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tuple[str, str]:
     combined = (country_text + " " + phone_or_range).lower()
-    for key, (country_name, flag) in COUNTRY_FLAG_MAP.items():
+    for key, (country_name, default_flag_symbol) in COUNTRY_FLAG_MAP.items():
         if key in combined:
-            return country_name, flag
-    return country_text or "Unknown", "🌐"
+            # Check if user has a custom global emoji for this country name or default flag symbol
+            resolved_flag = get_dynamic_icon(country_name, get_dynamic_icon(default_flag_symbol, default_flag_symbol))
+            return country_name, resolved_flag
+    
+    # Fallback check
+    resolved_flag = get_dynamic_icon(country_text, "🌐")
+    return country_text or "Unknown", resolved_flag
 
 
 class ZebraSMSClient:
@@ -273,8 +280,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ranges_list = []
     for r in managed_ranges:
-        srv_icon = get_dynamic_icon(r['service'], "🔹")
-        flag_icon = get_dynamic_icon(r['country'], r['flag'])
+        srv_icon = get_dynamic_icon(r['service'], "🛡️")
+        # Check custom icon for country name or fallback to saved flag
+        flag_icon = get_dynamic_icon(r['country'], get_dynamic_icon(r.get('flag'), r.get('flag', '🌐')))
         ranges_list.append(f"• {flag_icon} {srv_icon} <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)")
 
     ranges_text = "\n".join(ranges_list) if ranges_list else "No active ranges configured."
@@ -387,7 +395,6 @@ async def service_select_callback_handler(update: Update, context: ContextTypes.
     service_name = data.replace("srv_", "")
     managed_ranges = db_get_managed_ranges()
     
-    # Filter ranges matching this service
     service_ranges = [r for r in managed_ranges if r["service"].lower() == service_name.lower()]
     
     if not service_ranges:
@@ -399,8 +406,8 @@ async def service_select_callback_handler(update: Update, context: ContextTypes.
     keyboard = []
     for r in service_ranges:
         country_name = r["country"]
-        flag_icon = get_dynamic_icon(country_name, r.get("flag", "🌐"))
-        # callback stores service and range id or unique key
+        # Intelligently resolve flag icon with custom emoji mapping fallback
+        flag_icon = get_dynamic_icon(country_name, get_dynamic_icon(r.get("flag"), r.get("flag", "🌐")))
         range_id = r.get("id", r["range"])
         keyboard.append([InlineKeyboardButton(f"{flag_icon} {country_name}", callback_data=f"cnt_{service_name}_{range_id}")])
         
@@ -435,7 +442,6 @@ async def country_select_callback_handler(update: Update, context: ContextTypes.
             break
             
     if not target_range:
-        # Fallback search by range value or name match
         target_range = next((r for r in managed_ranges if r["service"].lower() == service_name.lower()), None)
         
     if not target_range:
@@ -446,7 +452,7 @@ async def country_select_callback_handler(update: Update, context: ContextTypes.
     country_name = target_range.get("country", "Unknown")
     
     srv_icon = get_dynamic_icon(service_name, "🛡️")
-    flag_icon = get_dynamic_icon(country_name, target_range.get("flag", "🌐"))
+    flag_icon = get_dynamic_icon(country_name, get_dynamic_icon(target_range.get("flag"), target_range.get("flag", "🌐")))
     
     await query.message.edit_text(f"⏳ Fetching number for {srv_icon} <b>{service_name}</b> ({flag_icon} {country_name})...", parse_mode="HTML")
     
@@ -497,7 +503,6 @@ async def back_to_services_callback_handler(update: Update, context: ContextType
         await query.message.edit_text("⚠️ No ranges available.")
         return
 
-    # Get unique services
     unique_services = sorted(list(set(r["service"] for r in managed_ranges)))
     
     keyboard = []
@@ -525,7 +530,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message.text else ""
 
-    # 1. Handle Admin Adding Range
+    # 1. Handle Admin Adding Range (Automatically binds custom emojis if present)
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text("⚠️ <b>Format Error!</b> Use: <code>Service | Country | Range</code>", parse_mode="HTML")
@@ -538,7 +543,15 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         db_add_managed_range(service, c_name, detected_flag, range_val)
         context.user_data["waiting_for_range"] = False
 
-        await update.message.reply_text(f"✅ <b>Saved Range:</b> <code>{service}</code> | <code>{c_name}</code> | <code>{range_val}</code>", parse_mode="HTML")
+        # Preview how it looks with icons resolved
+        srv_icon = get_dynamic_icon(service, "🛡️")
+        flag_icon = get_dynamic_icon(c_name, detected_flag)
+
+        await update.message.reply_text(
+            f"✅ <b>Saved Range Successfully!</b>\n\n"
+            f"Preview: {flag_icon} {srv_icon} <code>{service}</code> | <code>{c_name}</code> | <code>{range_val}</code>",
+            parse_mode="HTML"
+        )
         return
 
     # 2. Handle Setting Any Global Emoji (Services, Flags, Labels)
