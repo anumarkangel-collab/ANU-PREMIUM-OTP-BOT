@@ -312,6 +312,20 @@ class ZebraSMSClient:
             except Exception as e:
                 return {"meta": {"code": -500, "error": str(e)}}
 
+    async def get_sms(self, phone_number: str) -> dict:
+        """Checks for incoming SMS/OTP codes for an allocated phone number."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/publicapi/getsms",
+                    headers=self.headers,
+                    json={"number": phone_number},
+                    timeout=10.0,
+                )
+                return response.json()
+            except Exception as e:
+                return {"meta": {"code": -500, "error": str(e)}}
+
 
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
@@ -323,6 +337,51 @@ def get_main_keyboard():
         [KeyboardButton("👤 My Profile"), KeyboardButton("🎧 Support Hub")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+# --- Background Job: Check SMS every 2 seconds ---
+
+async def check_otp_job(context: ContextTypes.DEFAULT_TYPE):
+    job_data = context.job.data
+    chat_id = job_data["chat_id"]
+    phone_number = job_data["phone_number"]
+    service_name = job_data["service_name"]
+    
+    response = await zebra.get_sms(phone_number)
+    meta = response.get("meta", {})
+    
+    if meta.get("code") == 0:
+        rows = response.get("data", {}).get("rows", [])
+        if rows:
+            latest_sms = rows[0].get("message") or rows[0].get("sms") or rows[0].get("text")
+            if latest_sms:
+                # 1. Send OTP to User DM
+                dm_text = (
+                    f"🔔 <b>New OTP Received!</b>\n\n"
+                    f"🛡 <b>Service:</b> {service_name}\n"
+                    f"📱 <b>Number:</b> <code>{phone_number}</code>\n"
+                    f"💬 <b>Message / Code:</b>\n<code>{latest_sms}</code>"
+                )
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=dm_text, parse_mode="HTML")
+                except Exception as e:
+                    logging.error(f"Failed to send OTP to user DM: {e}")
+                
+                # 2. Forward to Channel (Masking number for privacy)
+                if CHANNEL_CHAT_ID:
+                    masked_number = phone_number[:5] + "XXXX" + phone_number[-2:] if len(phone_number) > 6 else "XXXX"
+                    channel_text = (
+                        f"⚡ <b>OTP Forwarded ({service_name})</b>\n"
+                        f"📱 Number: <code>{masked_number}</code>\n"
+                        f"💬 Code received successfully ✅"
+                    )
+                    try:
+                        await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=channel_text, parse_mode="HTML")
+                    except Exception as e:
+                        logging.error(f"Failed to broadcast OTP to channel: {e}")
+                
+                # Stop checking once the SMS is successfully received and forwarded
+                context.job.schedule_removal()
 
 
 # --- Admin Handlers ---
@@ -477,7 +536,7 @@ async def service_select_callback_handler(update: Update, context: ContextTypes.
 
 
 async def country_select_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 2: User selected country, now fetch number using the range."""
+    """Step 2: User selected country, fetch number, and start checking for SMS every 2 seconds."""
     query = update.callback_query
     await query.answer()
     
@@ -528,7 +587,8 @@ async def country_select_callback_handler(update: Update, context: ContextTypes.
                 f"✅ <b>Number Allocated Successfully!</b>\n\n"
                 f"{srv_icon} <b>Service:</b> {service_name}\n"
                 f"📱 <b>Number:</b> <code>{phone_number}</code>\n"
-                f"{flag_icon} <b>Country:</b> {resolved_country}"
+                f"{flag_icon} <b>Country:</b> {resolved_country}\n\n"
+                f"<i>🔄 Listening for incoming SMS codes (checking every 2 seconds)...</i>"
             )
             
             keyboard = [
@@ -539,6 +599,20 @@ async def country_select_callback_handler(update: Update, context: ContextTypes.
                 keyboard.append([InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)])
                 
             await query.message.edit_text(msg_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+            
+            # Start background job to check SMS every 2 seconds
+            if context.job_queue:
+                context.job_queue.run_repeating(
+                    check_otp_job,
+                    interval=2.0,  # Checked every 2 seconds
+                    first=2.0,
+                    data={
+                        "chat_id": query.message.chat_id,
+                        "phone_number": phone_number,
+                        "service_name": service_name
+                    },
+                    name=f"otp_{phone_number}"
+                )
             return
 
     error_msg = meta.get("error") or "Unknown error or out of stock."
@@ -556,7 +630,7 @@ async def back_to_services_callback_handler(update: Update, context: ContextType
     
     managed_ranges = db_get_managed_ranges()
     if not managed_ranges:
-        await query.message.edit_text("⚠️️ No ranges available.")
+        await query.message.edit_text("⚠ No ranges available.")
         return
 
     unique_services = sorted(list(set(r["service"] for r in managed_ranges)))
@@ -599,7 +673,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         db_add_managed_range(service, c_name, detected_flag, range_val)
         context.user_data["waiting_for_range"] = False
 
-        srv_icon = get_dynamic_icon(service, "🛡️")
+        srv_icon = get_dynamic_icon(service, "🛡️️")
         flag_icon = get_dynamic_icon(c_name, detected_flag)
 
         await update.message.reply_text(
