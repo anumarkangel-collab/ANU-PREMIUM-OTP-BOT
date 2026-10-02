@@ -527,7 +527,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         managed_ranges = db_get_managed_ranges()
         if not managed_ranges:
-            await query.message.reply_text("⚠️️ No ranges available to delete.")
+            await query.message.reply_text("⚠ No ranges available to delete.")
             return
 
         keyboard = [
@@ -586,11 +586,47 @@ async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT
         return
         
     range_val = target_range["range"]
-    await query.message.edit_text(f"⏳ Fetching number for <b>{service_name}</b> (Range: <code>{range_val}</code>)...", parse_mode="HTML")
+    flag = target_range.get("flag", "🌐")
+    
+    await query.message.edit_text(f"⏳ Fetching number for <b>{service_name}</b>...", parse_mode="HTML")
     
     response = await zebra.get_number(range_val)
     
-    await query.message.reply_text(f"📡 <b>API Response:</b>\n<pre>{response}</pre>", parse_mode="HTML", reply_markup=get_main_keyboard())
+    # Check if the API successfully returned a number
+    meta = response.get("meta", {})
+    if meta.get("code") == 0:
+        res_data = response.get("data", {})
+        rows = res_data.get("rows", [])
+        
+        if rows:
+            number_info = rows[0]
+            phone_number = number_info.get("number")
+            country_name = number_info.get("country", target_range.get("country", "Unknown"))
+            
+            # Format the output message to match your target layout
+            msg_text = (
+                f"✅ <b>Number Allocated Successfully!</b>\n\n"
+                f"📱 <b>Number:</b> <code>{phone_number}</code>\n"
+                f"{flag} <b>Country:</b> {country_name}"
+            )
+            
+            # Action buttons matching your screenshot layout
+            keyboard = [
+                [InlineKeyboardButton("🔄 Change Number", callback_data=f"srv_{service_name}")],
+            ]
+            if CHANNEL_URL:
+                keyboard.append([InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)])
+                
+            await query.message.edit_text(msg_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+
+    # Fallback if API returned an error or empty rows
+    error_msg = meta.get("error") or "Unknown error or out of stock."
+    await query.message.edit_text(
+        f"❌ <b>Failed to fetch number for {service_name}.</b>\n\nReason: <code>{error_msg}</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]])
+    )
 
 
 # --- User Handlers ---
