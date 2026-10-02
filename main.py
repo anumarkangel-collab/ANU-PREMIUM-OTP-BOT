@@ -127,7 +127,7 @@ def db_set_custom_emoji(keyword: str, emoji_id: str, fallback: str):
 
 
 def get_dynamic_icon(keyword: str, default_fallback: str = "🔹") -> str:
-    """Resolves icon for any keyword (service name, flag name, flag symbol, etc.) dynamically with smart fallbacks."""
+    """Resolves icon for any keyword dynamically with smart fallbacks."""
     if not keyword:
         return default_fallback
     emojis_map = db_get_custom_emojis()
@@ -206,20 +206,80 @@ def db_clear_managed_ranges():
         logging.error(f"Error clearing ranges from Supabase: {e}")
 
 
-# --- Country Flag & Code Mapping ---
+# --- Comprehensive Global Country Flag Mapping ---
 COUNTRY_FLAG_MAP = {
+    # Africa
     "algeria": ("Algeria", "🇩🇿"), "angola": ("Angola", "🇦🇴"), "benin": ("Benin", "🇧🇯"),
     "botswana": ("Botswana", "🇧🇼"), "burkina faso": ("Burkina Faso", "🇧🇫"), "burundi": ("Burundi", "🇧🇮"),
-    "cameroon": ("Cameroon", "🇨🇲"), "chad": ("Chad", "🇹🇩"), "egypt": ("Egypt", "🇪🇬"),
-    "ethiopia": ("Ethiopia", "🇪🇹"), "ghana": ("Ghana", "🇬🇭"), "ivory coast": ("Ivory Coast", "🇨🇮"),
-    "kenya": ("Kenya", "🇰🇪"), "morocco": ("Morocco", "🇲🇦"), "nigeria": ("Nigeria", "🇳🇬"),
-    "south africa": ("South Africa", "🇿🇦"), "tanzania": ("Tanzania", "🇹🇿"), "uganda": ("Uganda", "🇺🇬"),
-    "cambodia": ("Cambodia", "🇰🇭"), "china": ("China", "🇨🇳"), "india": ("India", "🇮🇳"),
-    "indonesia": ("Indonesia", "🇮🇩"), "pakistan": ("Pakistan", "🇵🇰"), "philippines": ("Philippines", "🇵🇭"),
-    "saudi arabia": ("Saudi Arabia", "🇸🇦"), "singapore": ("Singapore", "🇸🇬"), "vietnam": ("Vietnam", "🇻🇳"),
-    "france": ("France", "🇫🇷"), "germany": ("Germany", "🇩🇪"), "italy": ("Italy", "🇮🇹"),
-    "russia": ("Russia", "🇷🇺"), "spain": ("Spain", "🇪🇸"), "ukraine": ("Ukraine", "🇺🇦"),
-    "united kingdom": ("United Kingdom", "🇬🇧"), "usa": ("United States", "🇺🇸"),
+    "cameroon": ("Cameroon", "🇨🇲"), "cape verde": ("Cape Verde", "🇨🇻"), "central african republic": ("Central African Republic", "🇨🇫"),
+    "chad": ("Chad", "🇹🇩"), "comoros": ("Comoros", "🇰🇲"), "congo": ("Congo", "🇨🇬"),
+    "djibouti": ("Djibouti", "🇩🇯"), "egypt": ("Egypt", "🇪🇬"), "equatorial guinea": ("Equatorial Guinea", "🇬🇶"),
+    "eritrea": ("Eritrea", "🇪🇷"), "eswatini": ("Eswatini", "🇸🇿"), "ethiopia": ("Ethiopia", "🇪🇹"),
+    "gabon": ("Gabon", "🇬🇦"), "gambia": ("Gambia", "🇬🇲"), "ghana": ("Ghana", "🇬🇭"),
+    "guinea": ("Guinea", "🇬🇳"), "guinea-bissau": ("Guinea-Bissau", "🇬🇼"), "ivory coast": ("Ivory Coast", "🇨🇮"),
+    "kenya": ("Kenya", "🇰🇪"), "lesotho": ("Lesotho", "🇱🇸"), "liberia": ("Liberia", "🇱🇷"),
+    "libya": ("Libya", "🇱🇾"), "madagascar": ("Madagascar", "🇲🇬"), "malawi": ("Malawi", "🇲🇼"),
+    "mali": ("Mali", "🇲🇱"), "mauritania": ("Mauritania", "🇲🇷"), "mauritius": ("Mauritius", "🇲🇺"),
+    "morocco": ("Morocco", "🇲🇦"), "mozambique": ("Mozambique", "🇲🇿"), "namibia": ("Namibia", "🇳🇦"),
+    "niger": ("Niger", "🇳🇪"), "nigeria": ("Nigeria", "🇳🇬"), "rwanda": ("Rwanda", "🇷🇼"),
+    "sao tome and principe": ("Sao Tome and Principe", "🇸🇹"), "senegal": ("Senegal", "🇸🇳"), "seychelles": ("Seychelles", "🇸🇨"),
+    "sierra leone": ("Sierra Leone", "🇸🇱"), "somalia": ("Somalia", "🇸🇴"), "south africa": ("South Africa", "🇿🇦"),
+    "south sudan": ("South Sudan", "🇸🇸"), "sudan": ("Sudan", "🇸🇩"), "tanzania": ("Tanzania", "🇹🇿"),
+    "togo": ("Togo", "🇹🇬"), "tunisia": ("Tunisia", "🇹🇳"), "uganda": ("Uganda", "🇺🇬"),
+    "zambia": ("Zambia", "🇿🇲"), "zimbabwe": ("Zimbabwe", "🇿🇼"),
+
+    # Asia & Middle East
+    "afghanistan": ("Afghanistan", "🇦🇫"), "armenia": ("Armenia", "🇦🇲"), "azerbaijan": ("Azerbaijan", "🇦🇿"),
+    "bahrain": ("Bahrain", "🇧🇭"), "bangladesh": ("Bangladesh", "🇧🇩"), "bhutan": ("Bhutan", "🇧🇹"),
+    "brunei": ("Brunei", "🇧🇳"), "cambodia": ("Cambodia", "🇰🇭"), "china": ("China", "🇨🇳"),
+    "georgia": ("Georgia", "🇬🇪"), "hong kong": ("Hong Kong", "🇭🇰"), "india": ("India", "🇮🇳"),
+    "indonesia": ("Indonesia", "🇮🇩"), "iran": ("Iran", "🇮🇷"), "iraq": ("Iraq", "🇮🇶"),
+    "israel": ("Israel", "🇮🇱"), "japan": ("Japan", "🇯🇵"), "jordan": ("Jordan", "🇯🇴"),
+    "kazakhstan": ("Kazakhstan", "🇰🇿"), "kuwait": ("Kuwait", "🇰🇼"), "kyrgyzstan": ("Kyrgyzstan", "🇰🇬"),
+    "laos": ("Laos", "🇱🇦"), "lebanon": ("Lebanon", "🇱🇧"), "malaysia": ("Malaysia", "🇲🇾"),
+    "maldives": ("Maldives", "🇲🇻"), "mongolia": ("Mongolia", "🇲🇳"), "myanmar": ("Myanmar", "🇲🇲"),
+    "nepal": ("Nepal", "🇳🇵"), "north korea": ("North Korea", "🇰🇵"), "oman": ("Oman", "🇴🇲"),
+    "pakistan": ("Pakistan", "🇵🇰"), "palestine": ("Palestine", "🇵🇸"), "philippines": ("Philippines", "🇵🇭"),
+    "qatar": ("Qatar", "🇶🇦"), "saudi arabia": ("Saudi Arabia", "🇸🇦"), "singapore": ("Singapore", "🇸🇬"),
+    "south korea": ("South Korea", "🇰🇷"), "sri lanka": ("Sri Lanka", "🇱🇰"), "syria": ("Syria", "🇸🇾"),
+    "taiwan": ("Taiwan", "🇹🇼"), "tajikistan": ("Tajikistan", "🇹🇯"), "thailand": ("Thailand", "🇹🇭"),
+    "timor-leste": ("Timor-Leste", "🇹🇱"), "turkey": ("Turkey", "🇹🇷"), "turkmenistan": ("Turkmenistan", "🇹🇲"),
+    "united arab emirates": ("United Arab Emirates", "🇦🇪"), "uzbekistan": ("Uzbekistan", "🇺🇿"),
+    "vietnam": ("Vietnam", "🇻🇳"), "yemen": ("Yemen", "🇾🇪"),
+
+    # Europe
+    "albania": ("Albania", "🇦🇱"), "andorra": ("Andorra", "🇦🇩"), "austria": ("Austria", "🇦🇹"),
+    "belarus": ("Belarus", "🇧🇾"), "belgium": ("Belgium", "🇧🇪"), "bosnia and herzegovina": ("Bosnia and Herzegovina", "🇧🇦"),
+    "bulgaria": ("Bulgaria", "🇧🇬"), "croatia": ("Croatia", "🇭🇷"), "cyprus": ("Cyprus", "🇨🇾"),
+    "czech republic": ("Czech Republic", "🇨🇿"), "denmark": ("Denmark", "🇩🇰"), "estonia": ("Estonia", "🇪🇪"),
+    "finland": ("Finland", "🇫🇮"), "france": ("France", "🇫🇷"), "germany": ("Germany", "🇩🇪"),
+    "greece": ("Greece", "🇬🇷"), "hungary": ("Hungary", "🇭🇺"), "iceland": ("Iceland", "🇮🇸"),
+    "ireland": ("Ireland", "🇮🇪"), "italy": ("Italy", "🇮🇹"), "latvia": ("Latvia", "🇱🇻"),
+    "liechtenstein": ("Liechtenstein", "🇱🇮"), "lithuania": ("Lithuania", "🇱🇹"), "luxembourg": ("Luxembourg", "🇱🇺"),
+    "malta": ("Malta", "🇲🇹"), "moldova": ("Moldova", "🇲🇩"), "monaco": ("Monaco", "🇲🇨"),
+    "montenegro": ("Montenegro", "🇲🇪"), "netherlands": ("Netherlands", "🇳🇱"), "north macedonia": ("North Macedonia", "🇲🇰"),
+    "norway": ("Norway", "🇳🇴"), "poland": ("Poland", "🇵🇱"), "portugal": ("Portugal", "🇵🇹"),
+    "romania": ("Romania", "🇷🇴"), "russia": ("Russia", "🇷🇺"), "san marino": ("San Marino", "🇸🇲"),
+    "serbia": ("Serbia", "🇷🇸"), "slovakia": ("Slovakia", "🇸🇰"), "slovenia": ("Slovenia", "🇸🇮"),
+    "spain": ("Spain", "🇪🇸"), "sweden": ("Sweden", "🇸🇪"), "switzerland": ("Switzerland", "🇨🇭"),
+    "ukraine": ("Ukraine", "🇺🇦"), "united kingdom": ("United Kingdom", "🇬🇧"), "vatican city": ("Vatican City", "🇻🇦"),
+
+    # Americas
+    "argentina": ("Argentina", "🇦🇷"), "bahamas": ("Bahamas", "🇧🇸"), "barbados": ("Barbados", "🇧🇧"),
+    "belize": ("Belize", "🇧🇿"), "bolivia": ("Bolivia", "🇧🇴"), "brazil": ("Brazil", "🇧🇷"),
+    "canada": ("Canada", "🇨🇦"), "chile": ("Chile", "🇨🇱"), "colombia": ("Colombia", "🇨🇴"),
+    "costa rica": ("Costa Rica", "🇨🇷"), "cuba": ("Cuba", "🇨🇺"), "dominican republic": ("Dominican Republic", "🇩🇴"),
+    "ecuador": ("Ecuador", "🇪🇨"), "el salvador": ("El Salvador", "🇸🇻"), "guatemala": ("Guatemala", "🇬🇹"),
+    "guyana": ("Guyana", "🇬🇾"), "haiti": ("Haiti", "🇭🇹"), "honduras": ("Honduras", "🇭🇳"),
+    "jamaica": ("Jamaica", "🇯🇲"), "mexico": ("Mexico", "🇲🇽"), "nicaragua": ("Nicaragua", "🇳🇮"),
+    "panama": ("Panama", "🇵🇦"), "paraguay": ("Paraguay", "🇵🇾"), "peru": ("Peru", "🇵🇪"),
+    "suriname": ("Suriname", "🇸🇷"), "trinidad and tobago": ("Trinidad and Tobago", "🇹🇹"), "united states": ("United States", "🇺🇸"),
+    "usa": ("United States", "🇺🇸"), "uruguay": ("Uruguay", "🇺🇾"), "venezuela": ("Venezuela", "🇻🇪"),
+
+    # Oceania
+    "australia": ("Australia", "🇦🇺"), "fiji": ("Fiji", "🇫🇯"), "new zealand": ("New Zealand", "🇳🇿"),
+    "papua new guinea": ("Papua New Guinea", "🇵🇬"), "samoa": ("Samoa", "🇼🇸"), "solomon islands": ("Solomon Islands", "🇸🇧"),
+    "vanuatu": ("Vanuatu", "🇻🇺"),
 }
 
 
@@ -227,11 +287,9 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     combined = (country_text + " " + phone_or_range).lower()
     for key, (country_name, default_flag_symbol) in COUNTRY_FLAG_MAP.items():
         if key in combined:
-            # Check if user has a custom global emoji for this country name or default flag symbol
             resolved_flag = get_dynamic_icon(country_name, get_dynamic_icon(default_flag_symbol, default_flag_symbol))
             return country_name, resolved_flag
     
-    # Fallback check
     resolved_flag = get_dynamic_icon(country_text, "🌐")
     return country_text or "Unknown", resolved_flag
 
@@ -281,7 +339,6 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ranges_list = []
     for r in managed_ranges:
         srv_icon = get_dynamic_icon(r['service'], "🛡️")
-        # Check custom icon for country name or fallback to saved flag
         flag_icon = get_dynamic_icon(r['country'], get_dynamic_icon(r.get('flag'), r.get('flag', '🌐')))
         ranges_list.append(f"• {flag_icon} {srv_icon} <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)")
 
@@ -322,7 +379,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.message.reply_text(
             "✍ <b>Send the new range in this format:</b>\n\n"
             "<code>Service | Country | Range</code>\n\n"
-            "👉 <i>Example:</i> <code>Facebook | Ivory Coast | 225072XXX</code>",
+            "👉 <i>Example:</i> <code>Facebook | Ethiopia | 251911XXX</code>",
             parse_mode="HTML",
         )
 
@@ -331,9 +388,9 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["waiting_for_global_emoji"] = True
         await query.message.reply_text(
             "🎨 <b>Set Any Global Emoji (Services, Flags, Labels)</b>\n\n"
-            "Send the keyword (e.g., <code>Facebook</code>, <code>Ivory Coast</code>, <code>🇨🇮</code>, or <code>Get Number</code>) and paste/send your custom premium emoji or numeric ID.\n\n"
+            "Send the keyword and paste/send your custom premium emoji or numeric ID.\n\n"
             "👉 <b>Format:</b> <code>Keyword | CustomEmoji</code>\n"
-            "👉 <b>Example:</b> <code>Ivory Coast | 5323261730283863478</code>",
+            "👉 <b>Example:</b> <code>Ethiopia | 5323261730283863478</code>",
             parse_mode="HTML",
         )
 
@@ -406,7 +463,6 @@ async def service_select_callback_handler(update: Update, context: ContextTypes.
     keyboard = []
     for r in service_ranges:
         country_name = r["country"]
-        # Intelligently resolve flag icon with custom emoji mapping fallback
         flag_icon = get_dynamic_icon(country_name, get_dynamic_icon(r.get("flag"), r.get("flag", "🌐")))
         range_id = r.get("id", r["range"])
         keyboard.append([InlineKeyboardButton(f"{flag_icon} {country_name}", callback_data=f"cnt_{service_name}_{range_id}")])
@@ -500,7 +556,7 @@ async def back_to_services_callback_handler(update: Update, context: ContextType
     
     managed_ranges = db_get_managed_ranges()
     if not managed_ranges:
-        await query.message.edit_text("⚠️ No ranges available.")
+        await query.message.edit_text("⚠️️ No ranges available.")
         return
 
     unique_services = sorted(list(set(r["service"] for r in managed_ranges)))
@@ -530,7 +586,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message.text else ""
 
-    # 1. Handle Admin Adding Range (Automatically binds custom emojis if present)
+    # 1. Handle Admin Adding Range
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text("⚠️ <b>Format Error!</b> Use: <code>Service | Country | Range</code>", parse_mode="HTML")
@@ -543,7 +599,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         db_add_managed_range(service, c_name, detected_flag, range_val)
         context.user_data["waiting_for_range"] = False
 
-        # Preview how it looks with icons resolved
         srv_icon = get_dynamic_icon(service, "🛡️")
         flag_icon = get_dynamic_icon(c_name, detected_flag)
 
@@ -554,7 +609,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    # 2. Handle Setting Any Global Emoji (Services, Flags, Labels)
+    # 2. Handle Setting Any Global Emoji
     if context.user_data.get("waiting_for_global_emoji"):
         if "|" not in text:
             await update.message.reply_text("⚠️ <b>Format Error!</b> Send: <code>Keyword | PremiumEmoji_or_ID</code>", parse_mode="HTML")
@@ -603,7 +658,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ <b>Broadcast Sent!</b> Delivered to {success_count} users and channel.", parse_mode="HTML")
         return
 
-    # 4. Handle Main Menu "Get Number" Option (Step 1: Service Selection)
+    # 4. Handle Main Menu "Get Number" Option
     if "Get Number" in text:
         context.user_data["waiting_for_range"] = False
         context.user_data["waiting_for_global_emoji"] = False
