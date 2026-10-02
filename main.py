@@ -1,17 +1,4 @@
 import os
-import threading
-from flask import Flask
-from telegram import InlineQueryResultArticle, InputTextMessageContent, Update
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    Here is the full, integrated Python script combining your main Telegram bot structure with the new inline query copy feature.
-
-It uses `python-telegram-bot` (v20+) with `NestAsyncio` and Flask to keep the bot alive on Render, along with the inline handler that formats phone numbers as tap-to-copy code blocks.
-
-```python
-import os
 import asyncio
 from flask import Flask
 from threading import Thread
@@ -20,8 +7,11 @@ from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
+    MessageHandler,
     InlineQueryHandler,
+    CallbackQueryHandler,
     ContextTypes,
+    filters,
 )
 
 # ---------------------------------------------------------
@@ -108,8 +98,11 @@ def main():
     # Start the Flask web server in a background thread
     keep_alive()
 
-    # Get bot token from environment variable (or insert token string directly)
-    BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
+    # Get bot token from environment variable
+    BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
+
+    if not BOT_TOKEN:
+        raise ValueError("No Telegram Bot Token found in environment variables!")
 
     # Build python-telegram-bot application
     application = Application.builder().token(BOT_TOKEN).build()
