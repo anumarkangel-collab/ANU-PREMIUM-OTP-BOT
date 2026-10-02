@@ -48,9 +48,56 @@ MAX_SEEN_SIZE = 5000
 
 # Default fallbacks if database is empty
 DEFAULT_RANGES = [
-    {"id": 1, "service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
-    {"id": 2, "service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
+    {
+        "id": 1,
+        "service": "Facebook",
+        "country": "Cambodia",
+        "flag": "🇰🇭",
+        "range": "85531879XXX",
+        "custom_emoji_id": None,
+        "emoji_fallback": "📘",
+    },
+    {
+        "id": 2,
+        "service": "Telegram",
+        "country": "Ivory Coast",
+        "flag": "🇨🇮",
+        "range": "22501XXX",
+        "custom_emoji_id": None,
+        "emoji_fallback": "✈️",
+    },
 ]
+
+
+# --- Custom Emoji Helper Functions ---
+
+def extract_custom_emoji_id(message) -> tuple[str, str]:
+    """Extracts custom emoji ID and fallback character from message entities or numeric input."""
+    text = message.text.strip() if message.text else ""
+    
+    # Check if message contains custom_emoji entity from Telegram Premium
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == "custom_emoji":
+                emoji_id = entity.custom_emoji_id
+                fallback = text[entity.offset : entity.offset + entity.length]
+                return emoji_id, fallback
+
+    # Check context args / split text if sent as numeric ID (e.g. "5368324170671202286 📘")
+    tokens = text.split()
+    for token in tokens:
+        if token.isdigit() and len(token) > 10:
+            fallback = tokens[-1] if len(tokens) > 1 and not tokens[-1].isdigit() else "🔹"
+            return token, fallback
+
+    return None, None
+
+
+def render_emoji(emoji_id: str, fallback: str = "🔹") -> str:
+    """Formats custom emoji into Telegram HTML tag."""
+    if emoji_id:
+        return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+    return fallback
 
 
 # --- Database Helper Functions ---
@@ -103,6 +150,18 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         logging.error(f"Error inserting range to Supabase: {e}")
 
 
+def db_update_service_emoji(service_name: str, custom_emoji_id: str, fallback: str):
+    if not supabase:
+        return
+    try:
+        supabase.table("managed_ranges").update({
+            "custom_emoji_id": custom_emoji_id,
+            "emoji_fallback": fallback
+        }).ilike("service", service_name).execute()
+    except Exception as e:
+        logging.error(f"Error updating service emoji in Supabase: {e}")
+
+
 def db_delete_range_by_id(range_id: int):
     if not supabase:
         return
@@ -121,7 +180,7 @@ def db_clear_managed_ranges():
         logging.error(f"Error clearing ranges from Supabase: {e}")
 
 
-# --- Comprehensive Country Flag & Code Mapping ---
+# --- Country Flag & Code Mapping ---
 COUNTRY_FLAG_MAP = {
     # Africa
     "algeria": ("Algeria", "🇩🇿"), "213": ("Algeria", "🇩🇿"),
@@ -305,7 +364,7 @@ COUNTRY_FLAG_MAP = {
     "paraguay": ("Paraguay", "🇵🇾"), "595": ("Paraguay", "🇵🇾"),
     "peru": ("Peru", "🇵🇪"), "51": ("Peru", "🇵🇪"),
     "suriname": ("Suriname", "🇸🇷"), "597": ("Suriname", "🇸🇷"),
-    "trinidad": ("Trinidad and Tobago", "🇹🇹"), "1868": ("Trinidad and Tobago", "🇹🇹"),
+    "trinidad": ("Trinidad and Tobago", "🇹TT"), "1868": ("Trinidad and Tobago", "🇹🇹"),
     "usa": ("United States", "🇺🇸"), "united states": ("United States", "🇺🇸"), "us": ("United States", "🇺🇸"),
     "uruguay": ("Uruguay", "🇺🇾"), "598": ("Uruguay", "🇺🇾"),
     "venezuela": ("Venezuela", "🇻🇪"), "58": ("Venezuela", "🇻🇪"),
@@ -327,18 +386,6 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     return country_text or "Unknown", "🌐"
 
 
-def mask_phone_number(phone: str) -> str:
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) >= 8:
-        return f"+{digits[:3]}****{digits[-4:]}"
-    return phone
-
-
-def extract_code(message_text: str) -> str:
-    match = re.search(r"\b\d{4,8}\b", message_text)
-    return match.group(0) if match else "No code found"
-
-
 class ZebraSMSClient:
     def __init__(self, api_key: str):
         self.base_url = ZEBRA_BASE_URL
@@ -351,18 +398,6 @@ class ZebraSMSClient:
                     f"{self.base_url}/publicapi/getnum",
                     headers=self.headers,
                     json={"range": range_val},
-                    timeout=10.0,
-                )
-                return response.json()
-            except Exception as e:
-                return {"meta": {"code": -500, "error": str(e)}}
-
-    async def get_updates(self) -> dict:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    f"{self.base_url}/publicapi/getupdate",
-                    headers=self.headers,
                     timeout=10.0,
                 )
                 return response.json()
@@ -387,27 +422,64 @@ def get_main_keyboard():
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if ADMIN_ID != 0 and user_id != ADMIN_ID:
-        await update.message.reply_text(f"⛔ **Access Denied:** ID `{user_id}` is not admin.", parse_mode="Markdown")
+        await update.message.reply_text(f"⛔ <b>Access Denied:</b> ID <code>{user_id}</code> is not admin.", parse_mode="HTML")
         return
 
     managed_ranges = db_get_managed_ranges()
 
-    ranges_text = "\n".join(
-        [f"• {r['flag']} 🔹 **[{r['service']}]** {r['country']} (`{r['range']}`)" for r in managed_ranges]
-    ) or "No active ranges configured."
+    ranges_list = []
+    for r in managed_ranges:
+        emoji_disp = render_emoji(r.get("custom_emoji_id"), r.get("emoji_fallback", "🔹"))
+        ranges_list.append(f"• {r['flag']} {emoji_disp} <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)")
+
+    ranges_text = "\n".join(ranges_list) if ranges_list else "No active ranges configured."
 
     admin_msg = (
-        f"🛠 **Admin Configuration Panel** 🛠\n\n"
-        f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add or manage ranges:*"
+        f"🛠 <b>Admin Configuration Panel</b> 🛠\n\n"
+        f"📋 <b>Current Active Ranges (Stored in Database):</b>\n{ranges_text}\n\n"
+        f"👇 <i>Click below to add, update emojis, or manage ranges:</i>"
     )
 
     keyboard = [
-        [InlineKeyboardButton("➕ Add Range", callback_data="admin_add"), InlineKeyboardButton("🗑 Delete Specific Range", callback_data="admin_delete_list")],
-        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast"), InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear")],
+        [InlineKeyboardButton("➕ Add Range", callback_data="admin_add"), InlineKeyboardButton("🎭 Set Service Emoji", callback_data="admin_set_emoji")],
+        [InlineKeyboardButton("🗑 Delete Specific Range", callback_data="admin_delete_list"), InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🗑 Clear All Ranges", callback_data="admin_clear")],
     ]
 
-    await update.message.reply_text(admin_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(admin_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def set_emoji_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command alternative: /setemoji Facebook [CustomEmoji_or_ID]"""
+    user_id = update.effective_user.id
+    if ADMIN_ID != 0 and user_id != ADMIN_ID:
+        return
+
+    message = update.message
+    args = context.args
+
+    if not args:
+        await message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/setemoji &lt;Service&gt; &lt;Paste Premium Emoji or Send ID&gt;</code>\n\n"
+            "Example: <code>/setemoji Facebook 📘</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    service_name = args[0]
+    emoji_id, fallback = extract_custom_emoji_id(message)
+
+    if not emoji_id:
+        await message.reply_text("❌ No custom emoji or valid numeric emoji ID detected in message.")
+        return
+
+    db_update_service_emoji(service_name, emoji_id, fallback)
+    preview = render_emoji(emoji_id, fallback)
+
+    await message.reply_text(
+        f"✅ <b>Updated Emoji for {service_name}!</b>\n\nPreview: {preview}",
+        parse_mode="HTML"
+    )
 
 
 async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -424,10 +496,21 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         context.user_data["waiting_for_range"] = True
         await query.message.reply_text(
-            "✍ **Send the new range in this format:**\n\n"
-            "`Service | Country | Range`\n\n"
-            "👉 *Example:* `Facebook | Ivory Coast | 225072XXX`",
-            parse_mode="Markdown",
+            "✍ <b>Send the new range in this format:</b>\n\n"
+            "<code>Service | Country | Range</code>\n\n"
+            "👉 <i>Example:</i> <code>Facebook | Ivory Coast | 225072XXX</code>",
+            parse_mode="HTML",
+        )
+
+    elif data == "admin_set_emoji":
+        await query.answer()
+        context.user_data["waiting_for_emoji_update"] = True
+        await query.message.reply_text(
+            "🎭 <b>Set Service Premium Emoji</b>\n\n"
+            "Send the service name and paste/send your custom premium emoji or numeric emoji ID.\n\n"
+            "👉 <b>Format:</b> <code>Service | CustomEmoji</code>\n"
+            "👉 <b>Example:</b> <code>Facebook | 📘</code> (or paste direct Telegram Premium Emoji)",
+            parse_mode="HTML",
         )
 
     elif data == "admin_delete_list":
@@ -444,7 +527,8 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         keyboard.append([InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="admin_back")])
 
         await query.edit_message_text(
-            "🗑 **Select a specific range to delete:**",
+            "🗑 <b>Select a specific range to delete:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
@@ -454,21 +538,21 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         if target_id.isdigit():
             db_delete_range_by_id(int(target_id))
         
-        await query.edit_message_text("✅ **Range deleted successfully!** Use `/admin` to refresh.")
+        await query.edit_message_text("✅ <b>Range deleted successfully!</b> Use /admin to refresh.", parse_mode="HTML")
 
     elif data == "admin_broadcast":
         await query.answer()
         context.user_data["waiting_for_broadcast"] = True
         await query.message.reply_text(
-            "📢 **Send the message you want to broadcast.**\n\n"
+            "📢 <b>Send the message you want to broadcast.</b>\n\n"
             "It will be sent to all bot users and posted directly to your OTP channel!",
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
 
     elif data == "admin_clear":
         db_clear_managed_ranges()
         await query.answer("All ranges cleared!", show_alert=True)
-        await query.edit_message_text("🗑 **All configured ranges have been cleared.**")
+        await query.edit_message_text("🗑 <b>All configured ranges have been cleared.</b>", parse_mode="HTML")
 
     elif data == "admin_back":
         await cmd_admin(update, context)
@@ -481,21 +565,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_register_user(user.id, user.first_name)
 
     welcome_msg = (
-        f"👋 *ANU PREMIUM OTP BOT*\n\n"
-        f"Welcome, *{user.first_name}*!\n\n"
+        f"👋 <b>ANU PREMIUM OTP BOT</b>\n\n"
+        f"Welcome, <b>{user.first_name}</b>!\n\n"
         f"Need help or want to add a working number? Contact support: {SUPPORT_USERNAME}"
     )
-    await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    await update.message.reply_text(welcome_msg, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = update.message.text.strip() if update.message.text else ""
     user_id = update.effective_user.id
 
     # 1. Handle Admin Adding Range
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
-            await update.message.reply_text("⚠️ **Format Error!** Use: `Service | Country | Range`", parse_mode="Markdown")
+            await update.message.reply_text("⚠️ <b>Format Error!</b> Use: <code>Service | Country | Range</code>", parse_mode="HTML")
             return
 
         parts = [p.strip() for p in text.split("|")]
@@ -505,18 +589,43 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         db_add_managed_range(service, c_name, detected_flag, range_val)
         context.user_data["waiting_for_range"] = False
 
-        await update.message.reply_text(f"✅ **Saved Range:** `{service}` | `{c_name}` | `{range_val}`", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ <b>Saved Range:</b> <code>{service}</code> | <code>{c_name}</code> | <code>{range_val}</code>", parse_mode="HTML")
         return
 
-    # 2. Handle Admin Broadcasting Message
+    # 2. Handle Admin Setting Emoji Interactive Prompt
+    if context.user_data.get("waiting_for_emoji_update"):
+        if "|" not in text:
+            await update.message.reply_text("⚠️ <b>Format Error!</b> Send: <code>Service | PremiumEmoji_or_ID</code>", parse_mode="HTML")
+            return
+
+        parts = [p.strip() for p in text.split("|", 1)]
+        service_name = parts[0]
+
+        emoji_id, fallback = extract_custom_emoji_id(update.message)
+
+        if not emoji_id:
+            await update.message.reply_text("❌ No custom premium emoji or valid emoji ID detected in message.")
+            return
+
+        db_update_service_emoji(service_name, emoji_id, fallback)
+        context.user_data["waiting_for_emoji_update"] = False
+
+        preview = render_emoji(emoji_id, fallback)
+        await update.message.reply_text(
+            f"✅ <b>Updated Emoji for {service_name}!</b>\n\nPreview: {preview}",
+            parse_mode="HTML"
+        )
+        return
+
+    # 3. Handle Admin Broadcasting Message
     if context.user_data.get("waiting_for_broadcast"):
         context.user_data["waiting_for_broadcast"] = False
-        broadcast_text = f"📢 **ANNOUNCEMENT**\n\n{text}"
+        broadcast_text = f"📢 <b>ANNOUNCEMENT</b>\n\n{text}"
         
         # Send to OTP Channel
         if CHANNEL_CHAT_ID:
             try:
-                await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=broadcast_text, parse_mode="Markdown")
+                await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=broadcast_text, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"Failed to broadcast to channel: {e}")
 
@@ -525,25 +634,36 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         success_count = 0
         for u_id in user_ids:
             try:
-                await context.bot.send_message(chat_id=u_id, text=broadcast_text, parse_mode="Markdown")
+                await context.bot.send_message(chat_id=u_id, text=broadcast_text, parse_mode="HTML")
                 success_count += 1
                 await asyncio.sleep(0.05)  # Rate limiting
             except Exception:
                 pass
 
-        await update.message.reply_text(f"✅ **Broadcast Sent!** Delivered to {success_count} users and the channel.")
+        await update.message.reply_text(f"✅ <b>Broadcast Sent!</b> Delivered to {success_count} users and channel.", parse_mode="HTML")
         return
 
-    # 3. Handle Main Menu Options
+    # 4. Handle Main Menu Options
     if "Get Number" in text:
         managed_ranges = db_get_managed_ranges()
         if not managed_ranges:
             await update.message.reply_text("⚠️ No ranges available.", reply_markup=get_main_keyboard())
             return
 
-        services = sorted(list(set(r["service"] for r in managed_ranges)))
-        keyboard = [[InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")] for srv in services]
-        await update.message.reply_text("🛠 **Select a Service:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        # Deduplicate services while retrieving custom emoji IDs
+        services_map = {}
+        for r in managed_ranges:
+            srv = r["service"]
+            e_id = r.get("custom_emoji_id")
+            fallback = r.get("emoji_fallback", "🛡️")
+            services_map[srv] = (e_id, fallback)
+
+        keyboard = []
+        for srv, (e_id, fallback) in services_map.items():
+            icon = render_emoji(e_id, fallback) if e_id else fallback
+            keyboard.append([InlineKeyboardButton(f"{icon} {srv}", callback_data=f"srv_{srv}")])
+
+        await update.message.reply_text("🛠 <b>Select a Service:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def post_init(application):
@@ -556,6 +676,7 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("setemoji", set_emoji_command))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|del_range_)"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
