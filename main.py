@@ -41,11 +41,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# --- Global State ---
-active_allocations = {}
-seen_messages = set()
-MAX_SEEN_SIZE = 5000
-
 # Default fallbacks if database is empty
 DEFAULT_RANGES = [
     {
@@ -54,8 +49,6 @@ DEFAULT_RANGES = [
         "country": "Cambodia",
         "flag": "🇰🇭",
         "range": "85531879XXX",
-        "custom_emoji_id": None,
-        "emoji_fallback": "📘",
     },
     {
         "id": 2,
@@ -63,19 +56,16 @@ DEFAULT_RANGES = [
         "country": "Ivory Coast",
         "flag": "🇨🇮",
         "range": "22501XXX",
-        "custom_emoji_id": None,
-        "emoji_fallback": "✈️",
     },
 ]
 
 
-# --- Custom Emoji Helper Functions ---
+# --- Universal Custom Emoji Helper Functions ---
 
 def extract_custom_emoji_id(message) -> tuple[str, str]:
     """Extracts custom emoji ID and fallback character from message entities or raw text."""
     text = message.text.strip() if message.text else ""
 
-    # 1. Check if message contains a custom_emoji entity from Telegram Premium
     if message.entities:
         for entity in message.entities:
             if entity.type == "custom_emoji":
@@ -83,7 +73,6 @@ def extract_custom_emoji_id(message) -> tuple[str, str]:
                 fallback = text[entity.offset : entity.offset + entity.length]
                 return emoji_id, fallback
 
-    # 2. Extract numeric ID when using "Service | NumericID" format
     if "|" in text:
         parts = [p.strip() for p in text.split("|", 1)]
         if len(parts) > 1:
@@ -92,13 +81,12 @@ def extract_custom_emoji_id(message) -> tuple[str, str]:
             if match:
                 emoji_id = match.group(1)
                 remainder = val.replace(emoji_id, "").strip()
-                fallback = remainder if remainder else "📘"
+                fallback = remainder if remainder else "🔹"
                 return emoji_id, fallback
 
-    # 3. Fallback: search for any standalone 10+ digit numeric ID in message
     match = re.search(r"\b(\d{10,})\b", text)
     if match:
-        return match.group(1), "📘"
+        return match.group(1), "🔹"
 
     return None, None
 
@@ -108,6 +96,44 @@ def render_emoji(emoji_id: str, fallback: str = "🔹") -> str:
     if emoji_id:
         return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
     return fallback
+
+
+def db_get_custom_emojis() -> dict:
+    """Fetches custom global emoji mappings from Supabase (table: custom_emojis)."""
+    if not supabase:
+        return {}
+    try:
+        response = supabase.table("custom_emojis").select("*").execute()
+        if response.data:
+            return {row["keyword"].lower(): {"emoji_id": row["custom_emoji_id"], "fallback": row["fallback"]} for row in response.data}
+    except Exception as e:
+        logging.error(f"Error fetching custom emojis: {e}")
+    return {}
+
+
+def db_set_custom_emoji(keyword: str, emoji_id: str, fallback: str):
+    """Saves or updates a custom global emoji mapping in Supabase."""
+    if not supabase:
+        return
+    try:
+        data = {
+            "keyword": keyword.lower().strip(),
+            "custom_emoji_id": emoji_id,
+            "fallback": fallback
+        }
+        supabase.table("custom_emojis").upsert(data, on_conflict="keyword").execute()
+    except Exception as e:
+        logging.error(f"Error saving custom emoji to Supabase: {e}")
+
+
+def get_dynamic_icon(keyword: str, default_fallback: str = "🔹") -> str:
+    """Resolves icon for any keyword (service name, flag name, flag symbol, etc.) dynamically."""
+    emojis_map = db_get_custom_emojis()
+    key = keyword.lower().strip()
+    if key in emojis_map:
+        item = emojis_map[key]
+        return render_emoji(item["emoji_id"], item["fallback"])
+    return default_fallback
 
 
 # --- Database Helper Functions ---
@@ -160,18 +186,6 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         logging.error(f"Error inserting range to Supabase: {e}")
 
 
-def db_update_service_emoji(service_name: str, custom_emoji_id: str, fallback: str):
-    if not supabase:
-        return
-    try:
-        supabase.table("managed_ranges").update({
-            "custom_emoji_id": custom_emoji_id,
-            "emoji_fallback": fallback
-        }).ilike("service", service_name).execute()
-    except Exception as e:
-        logging.error(f"Error updating service emoji in Supabase: {e}")
-
-
 def db_delete_range_by_id(range_id: int):
     if not supabase:
         return
@@ -192,199 +206,18 @@ def db_clear_managed_ranges():
 
 # --- Country Flag & Code Mapping ---
 COUNTRY_FLAG_MAP = {
-    # Africa
-    "algeria": ("Algeria", "🇩🇿"), "213": ("Algeria", "🇩🇿"),
-    "angola": ("Angola", "🇦🇴"), "244": ("Angola", "🇦🇴"),
-    "benin": ("Benin", "🇧🇯"), "229": ("Benin", "🇧🇯"),
-    "botswana": ("Botswana", "🇧🇼"), "267": ("Botswana", "🇧🇼"),
-    "burkina faso": ("Burkina Faso", "🇧🇫"), "226": ("Burkina Faso", "🇧🇫"),
-    "burundi": ("Burundi", "🇧🇮"), "257": ("Burundi", "🇧🇮"),
-    "cameroon": ("Cameroon", "🇨🇲"), "237": ("Cameroon", "🇨🇲"),
-    "cape verde": ("Cape Verde", "🇨🇻"), "238": ("Cape Verde", "🇨🇻"),
-    "central african republic": ("Central African Republic", "🇨🇫"), "236": ("Central African Republic", "🇨🇫"),
-    "chad": ("Chad", "🇹🇩"), "235": ("Chad", "🇹🇩"),
-    "comoros": ("Comoros", "🇰🇲"), "269": ("Comoros", "🇰🇲"),
-    "congo": ("Congo", "🇨🇬"), "242": ("Congo", "🇨🇬"),
-    "dr congo": ("DR Congo", "🇨🇩"), "drc": ("DR Congo", "🇨🇩"), "243": ("DR Congo", "🇨🇩"),
-    "djibouti": ("Djibouti", "🇩🇯"), "253": ("Djibouti", "🇩🇯"),
-    "egypt": ("Egypt", "🇪🇬"), "20": ("Egypt", "🇪🇬"),
-    "equatorial guinea": ("Equatorial Guinea", "🇬🇶"), "240": ("Equatorial Guinea", "🇬🇶"),
-    "eritrea": ("Eritrea", "🇪🇷"), "291": ("Eritrea", "🇪🇷"),
-    "eswatini": ("Eswatini", "🇸🇿"), "swaziland": ("Eswatini", "🇸🇿"), "268": ("Eswatini", "🇸🇿"),
-    "ethiopia": ("Ethiopia", "🇪🇹"), "251": ("Ethiopia", "🇪🇹"),
-    "gabon": ("Gabon", "🇬🇦"), "241": ("Gabon", "🇬🇦"),
-    "gambia": ("Gambia", "🇬🇲"), "220": ("Gambia", "🇬🇲"),
-    "ghana": ("Ghana", "🇬🇭"), "233": ("Ghana", "🇬🇭"),
-    "guinea": ("Guinea", "🇬🇳"), "224": ("Guinea", "🇬🇳"),
-    "guinea-bissau": ("Guinea-Bissau", "🇬🇼"), "245": ("Guinea-Bissau", "🇬🇼"),
-    "ivory coast": ("Ivory Coast", "🇨🇮"), "cote d'ivoire": ("Ivory Coast", "🇨🇮"), "225": ("Ivory Coast", "🇨🇮"),
-    "kenya": ("Kenya", "🇰🇪"), "254": ("Kenya", "🇰🇪"),
-    "lesotho": ("Lesotho", "🇱🇸"), "266": ("Lesotho", "🇱🇸"),
-    "liberia": ("Liberia", "🇱🇷"), "231": ("Liberia", "🇱🇷"),
-    "libya": ("Libya", "🇱🇾"), "218": ("Libya", "🇱🇾"),
-    "madagascar": ("Madagascar", "🇲🇬"), "261": ("Madagascar", "🇲🇬"),
-    "malawi": ("Malawi", "🇲🇼"), "265": ("Malawi", "🇲🇼"),
-    "mali": ("Mali", "🇲🇱"), "223": ("Mali", "🇲🇱"),
-    "mauritania": ("Mauritania", "🇲🇷"), "222": ("Mauritania", "🇲🇷"),
-    "mauritius": ("Mauritius", "🇲🇺"), "230": ("Mauritius", "🇲🇺"),
-    "morocco": ("Morocco", "🇲🇦"), "212": ("Morocco", "🇲🇦"),
-    "mozambique": ("Mozambique", "🇲🇿"), "258": ("Mozambique", "🇲🇿"),
-    "namibia": ("Namibia", "🇳🇦"), "264": ("Namibia", "🇳🇦"),
-    "niger": ("Niger", "🇳🇪"), "227": ("Niger", "🇳🇪"),
-    "nigeria": ("Nigeria", "🇳🇬"), "234": ("Nigeria", "🇳🇬"),
-    "rwanda": ("Rwanda", "🇷🇼"), "250": ("Rwanda", "🇷🇼"),
-    "sao tome and principe": ("Sao Tome and Principe", "🇸🇹"), "239": ("Sao Tome and Principe", "🇸🇹"),
-    "senegal": ("Senegal", "🇸🇳"), "221": ("Senegal", "🇸🇳"),
-    "seychelles": ("Seychelles", "🇸🇨"), "248": ("Seychelles", "🇸🇨"),
-    "sierra leone": ("Sierra Leone", "🇸🇱"), "232": ("Sierra Leone", "🇸🇱"),
-    "somalia": ("Somalia", "🇸🇴"), "252": ("Somalia", "🇸🇴"),
-    "south africa": ("South Africa", "🇿🇦"), "27": ("South Africa", "🇿🇦"),
-    "south sudan": ("South Sudan", "🇸🇸"), "211": ("South Sudan", "🇸🇸"),
-    "sudan": ("Sudan", "🇸🇩"), "249": ("Sudan", "🇸🇩"),
-    "tanzania": ("Tanzania", "🇹🇿"), "255": ("Tanzania", "🇹🇿"),
-    "togo": ("Togo", "🇹🇬"), "228": ("Togo", "🇹🇬"),
-    "tunisia": ("Tunisia", "🇹🇳"), "216": ("Tunisia", "🇹🇳"),
-    "uganda": ("Uganda", "🇺🇬"), "256": ("Uganda", "🇺🇬"),
-    "zambia": ("Zambia", "🇿🇲"), "260": ("Zambia", "🇿🇲"),
-    "zimbabwe": ("Zimbabwe", "🇿🇼"), "263": ("Zimbabwe", "🇿🇼"),
-
-    # Asia & Middle East
-    "afghanistan": ("Afghanistan", "🇦🇫"), "93": ("Afghanistan", "🇦🇫"),
-    "armenia": ("Armenia", "🇦🇲"), "374": ("Armenia", "🇦🇲"),
-    "azerbaijan": ("Azerbaijan", "🇦🇿"), "994": ("Azerbaijan", "🇦🇿"),
-    "bahrain": ("Bahrain", "🇧🇭"), "973": ("Bahrain", "🇧🇭"),
-    "bangladesh": ("Bangladesh", "🇧🇩"), "880": ("Bangladesh", "🇧🇩"),
-    "bhutan": ("Bhutan", "🇧🇹"), "975": ("Bhutan", "🇧🇹"),
-    "brunei": ("Brunei", "🇧🇳"), "673": ("Brunei", "🇧🇳"),
-    "cambodia": ("Cambodia", "🇰🇭"), "855": ("Cambodia", "🇰🇭"),
-    "china": ("China", "🇨🇳"), "86": ("China", "🇨🇳"),
-    "georgia": ("Georgia", "🇬🇪"), "995": ("Georgia", "🇬🇪"),
-    "hong kong": ("Hong Kong", "🇭🇰"), "852": ("Hong Kong", "🇭🇰"),
-    "india": ("India", "🇮🇳"), "91": ("India", "🇮🇳"),
-    "indonesia": ("Indonesia", "🇮🇩"), "62": ("Indonesia", "🇮🇩"),
-    "iran": ("Iran", "🇮🇷"), "98": ("Iran", "🇮🇷"),
-    "iraq": ("Iraq", "🇮🇶"), "964": ("Iraq", "🇮🇶"),
-    "israel": ("Israel", "🇮🇱"), "972": ("Israel", "🇮🇱"),
-    "japan": ("Japan", "🇯🇵"), "81": ("Japan", "🇯🇵"),
-    "jordan": ("Jordan", "🇯🇴"), "962": ("Jordan", "🇯🇴"),
-    "kazakhstan": ("Kazakhstan", "🇰🇿"), "77": ("Kazakhstan", "🇰🇿"),
-    "kuwait": ("Kuwait", "🇰🇼"), "965": ("Kuwait", "🇰🇼"),
-    "kyrgyzstan": ("Kyrgyzstan", "🇰🇬"), "996": ("Kyrgyzstan", "🇰🇬"),
-    "laos": ("Laos", "🇱🇦"), "856": ("Laos", "🇱🇦"),
-    "lebanon": ("Lebanon", "🇱🇧"), "961": ("Lebanon", "🇱🇧"),
-    "macau": ("Macau", "🇲🇴"), "853": ("Macau", "🇲🇴"),
-    "malaysia": ("Malaysia", "🇲🇾"), "60": ("Malaysia", "🇲🇾"),
-    "maldives": ("Maldives", "🇲🇻"), "960": ("Maldives", "🇲🇻"),
-    "mongolia": ("Mongolia", "🇲🇳"), "976": ("Mongolia", "🇲🇳"),
-    "myanmar": ("Myanmar", "🇲🇲"), "burma": ("Myanmar", "🇲🇲"), "95": ("Myanmar", "🇲🇲"),
-    "nepal": ("Nepal", "🇳🇵"), "977": ("Nepal", "🇳🇵"),
-    "north korea": ("North Korea", "🇰🇵"), "850": ("North Korea", "🇰🇵"),
-    "oman": ("Oman", "🇴🇲"), "968": ("Oman", "🇴🇲"),
-    "pakistan": ("Pakistan", "🇵🇰"), "92": ("Pakistan", "🇵🇰"),
-    "palestine": ("Palestine", "🇵🇸"), "970": ("Palestine", "🇵🇸"),
-    "philippines": ("Philippines", "🇵🇭"), "63": ("Philippines", "🇵🇭"),
-    "qatar": ("Qatar", "🇶🇦"), "974": ("Qatar", "🇶🇦"),
-    "saudi arabia": ("Saudi Arabia", "🇸🇦"), "ksa": ("Saudi Arabia", "🇸🇦"), "966": ("Saudi Arabia", "🇸🇦"),
-    "singapore": ("Singapore", "🇸🇬"), "65": ("Singapore", "🇸🇬"),
-    "south korea": ("South Korea", "🇰🇷"), "korea": ("South Korea", "🇰🇷"), "82": ("South Korea", "🇰🇷"),
-    "sri lanka": ("Sri Lanka", "🇱🇰"), "94": ("Sri Lanka", "🇱🇰"),
-    "syria": ("Syria", "🇸🇾"), "963": ("Syria", "🇸🇾"),
-    "taiwan": ("Taiwan", "🇹🇼"), "886": ("Taiwan", "🇹🇼"),
-    "tajikistan": ("Tajikistan", "🇹🇯"), "992": ("Tajikistan", "🇹🇯"),
-    "thailand": ("Thailand", "🇹🇭"), "66": ("Thailand", "🇹🇭"),
-    "timor-leste": ("Timor-Leste", "🇹🇱"), "670": ("Timor-Leste", "🇹🇱"),
-    "turkey": ("Turkey", "🇹🇷"), "turkiye": ("Turkey", "🇹🇷"), "90": ("Turkey", "🇹🇷"),
-    "turkmenistan": ("Turkmenistan", "🇹🇲"), "993": ("Turkmenistan", "🇹🇲"),
-    "uae": ("United Arab Emirates", "🇦🇪"), "dubai": ("United Arab Emirates", "🇦🇪"), "971": ("United Arab Emirates", "🇦🇪"),
-    "uzbekistan": ("Uzbekistan", "🇺🇿"), "998": ("Uzbekistan", "🇺🇿"),
-    "vietnam": ("Vietnam", "🇻🇳"), "84": ("Vietnam", "🇻🇳"),
-    "yemen": ("Yemen", "🇾🇪"), "967": ("Yemen", "🇾🇪"),
-
-    # Europe
-    "albania": ("Albania", "🇦🇱"), "355": ("Albania", "🇦🇱"),
-    "andorra": ("Andorra", "🇦🇩"), "376": ("Andorra", "🇦🇩"),
-    "austria": ("Austria", "🇦🇹"), "43": ("Austria", "🇦🇹"),
-    "belarus": ("Belarus", "🇧🇾"), "375": ("Belarus", "🇧🇾"),
-    "belgium": ("Belgium", "🇧🇪"), "32": ("Belgium", "🇧🇪"),
-    "bosnia": ("Bosnia and Herzegovina", "🇧🇦"), "387": ("Bosnia and Herzegovina", "🇧🇦"),
-    "bulgaria": ("Bulgaria", "🇧🇬"), "359": ("Bulgaria", "🇧🇬"),
-    "croatia": ("Croatia", "🇭🇷"), "385": ("Croatia", "🇭🇷"),
-    "cyprus": ("Cyprus", "🇨🇾"), "357": ("Cyprus", "🇨🇾"),
-    "czechia": ("Czech Republic", "🇨🇿"), "czech": ("Czech Republic", "🇨🇿"), "420": ("Czech Republic", "🇨🇿"),
-    "denmark": ("Denmark", "🇩🇰"), "45": ("Denmark", "🇩🇰"),
-    "estonia": ("Estonia", "🇪🇪"), "372": ("Estonia", "🇪🇪"),
-    "finland": ("Finland", "🇫🇮"), "358": ("Finland", "🇫🇮"),
-    "france": ("France", "🇫🇷"), "33": ("France", "🇫🇷"),
-    "germany": ("Germany", "🇩🇪"), "49": ("Germany", "🇩🇪"),
-    "greece": ("Greece", "🇬🇷"), "30": ("Greece", "🇬🇷"),
-    "hungary": ("Hungary", "🇭🇺"), "36": ("Hungary", "🇭🇺"),
-    "iceland": ("Iceland", "🇮🇸"), "354": ("Iceland", "🇮🇸"),
-    "ireland": ("Ireland", "🇮🇪"), "353": ("Ireland", "🇮🇪"),
-    "italy": ("Italy", "🇮🇹"), "39": ("Italy", "🇮🇹"),
-    "kosovo": ("Kosovo", "🇽🇰"), "383": ("Kosovo", "🇽🇰"),
-    "latvia": ("Latvia", "🇱🇻"), "371": ("Latvia", "🇱🇻"),
-    "liechtenstein": ("Liechtenstein", "🇱🇮"), "423": ("Liechtenstein", "🇱🇮"),
-    "lithuania": ("Lithuania", "🇱🇹"), "370": ("Lithuania", "🇱🇹"),
-    "luxembourg": ("Luxembourg", "🇱🇺"), "352": ("Luxembourg", "🇱🇺"),
-    "malta": ("Malta", "🇲🇹"), "356": ("Malta", "🇲🇹"),
-    "moldova": ("Moldova", "🇲🇩"), "373": ("Moldova", "🇲🇩"),
-    "monaco": ("Monaco", "🇲🇨"), "377": ("Monaco", "🇲🇨"),
-    "montenegro": ("Montenegro", "🇲🇪"), "382": ("Montenegro", "🇲🇪"),
-    "netherlands": ("Netherlands", "🇳🇱"), "holland": ("Netherlands", "🇳🇱"), "31": ("Netherlands", "🇳🇱"),
-    "north macedonia": ("North Macedonia", "🇲🇰"), "macedonia": ("North Macedonia", "🇲🇰"), "389": ("North Macedonia", "🇲🇰"),
-    "norway": ("Norway", "🇳🇴"), "47": ("Norway", "🇳🇴"),
-    "poland": ("Poland", "🇵🇱"), "48": ("Poland", "🇵🇱"),
-    "portugal": ("Portugal", "🇵🇹"), "351": ("Portugal", "🇵🇹"),
-    "romania": ("Romania", "🇷🇴"), "40": ("Romania", "🇷🇴"),
-    "russia": ("Russia", "🇷🇺"), "7": ("Russia", "🇷🇺"),
-    "san marino": ("San Marino", "🇸🇲"), "378": ("San Marino", "🇸🇲"),
-    "serbia": ("Serbia", "🇷🇸"), "381": ("Serbia", "🇷🇸"),
-    "slovakia": ("Slovakia", "🇸🇰"), "421": ("Slovakia", "🇸🇰"),
-    "slovenia": ("Slovenia", "🇸🇮"), "386": ("Slovenia", "🇸🇮"),
-    "spain": ("Spain", "🇪🇸"), "34": ("Spain", "🇪🇸"),
-    "sweden": ("Sweden", "🇸🇪"), "46": ("Sweden", "🇸🇪"),
-    "switzerland": ("Switzerland", "🇨🇭"), "41": ("Switzerland", "🇨🇭"),
-    "ukraine": ("Ukraine", "🇺🇦"), "380": ("Ukraine", "🇺🇦"),
-    "uk": ("United Kingdom", "🇬🇧"), "united kingdom": ("United Kingdom", "🇬🇧"), "england": ("United Kingdom", "🇬🇧"), "44": ("United Kingdom", "🇬🇧"),
-    "vatican": ("Vatican City", "🇻🇦"), "379": ("Vatican City", "🇻🇦"),
-
-    # Americas
-    "argentina": ("Argentina", "🇦🇷"), "54": ("Argentina", "🇦🇷"),
-    "bahamas": ("Bahamas", "🇧🇸"), "1242": ("Bahamas", "🇧🇸"),
-    "barbados": ("Barbados", "🇧🇧"), "1246": ("Barbados", "🇧🇧"),
-    "belize": ("Belize", "🇧🇿"), "501": ("Belize", "🇧🇿"),
-    "bolivia": ("Bolivia", "🇧🇴"), "591": ("Bolivia", "🇧🇴"),
-    "brazil": ("Brazil", "🇧🇷"), "55": ("Brazil", "🇧🇷"),
-    "canada": ("Canada", "🇨🇦"), "1": ("North America", "🇺🇸"),
-    "chile": ("Chile", "🇨🇱"), "56": ("Chile", "🇨🇱"),
-    "colombia": ("Colombia", "🇨🇴"), "57": ("Colombia", "🇨🇴"),
-    "costa rica": ("Costa Rica", "🇨🇷"), "506": ("Costa Rica", "🇨🇷"),
-    "cuba": ("Cuba", "🇨🇺"), "53": ("Cuba", "🇨🇺"),
-    "dominican republic": ("Dominican Republic", "🇩🇴"), "1809": ("Dominican Republic", "🇩🇴"),
-    "ecuador": ("Ecuador", "🇪🇨"), "593": ("Ecuador", "🇪🇨"),
-    "el salvador": ("El Salvador", "🇸🇻"), "503": ("El Salvador", "🇸🇻"),
-    "guatemala": ("Guatemala", "🇬🇹"), "502": ("Guatemala", "🇬🇹"),
-    "guyana": ("Guyana", "🇬🇾"), "592": ("Guyana", "🇬🇾"),
-    "haiti": ("Haiti", "🇭🇹"), "509": ("Haiti", "🇭🇹"),
-    "honduras": ("Honduras", "🇭🇳"), "504": ("Honduras", "🇭🇳"),
-    "jamaica": ("Jamaica", "🇯🇲"), "1876": ("Jamaica", "🇯🇲"),
-    "mexico": ("Mexico", "🇲🇽"), "52": ("Mexico", "🇲🇽"),
-    "nicaragua": ("Nicaragua", "🇳🇮"), "505": ("Nicaragua", "🇳🇮"),
-    "panama": ("Panama", "🇵🇦"), "507": ("Panama", "🇵🇦"),
-    "paraguay": ("Paraguay", "🇵🇾"), "595": ("Paraguay", "🇵🇾"),
-    "peru": ("Peru", "🇵🇪"), "51": ("Peru", "🇵🇪"),
-    "suriname": ("Suriname", "🇸🇷"), "597": ("Suriname", "🇸🇷"),
-    "trinidad": ("Trinidad and Tobago", "🇹🇹"), "1868": ("Trinidad and Tobago", "🇹🇹"),
-    "usa": ("United States", "🇺🇸"), "united states": ("United States", "🇺🇸"), "us": ("United States", "🇺🇸"),
-    "uruguay": ("Uruguay", "🇺🇾"), "598": ("Uruguay", "🇺🇾"),
-    "venezuela": ("Venezuela", "🇻🇪"), "58": ("Venezuela", "🇻🇪"),
-
-    # Oceania
-    "australia": ("Australia", "🇦🇺"), "61": ("Australia", "🇦🇺"),
-    "fiji": ("Fiji", "🇫🇯"), "679": ("Fiji", "🇫🇯"),
-    "new zealand": ("New Zealand", "🇳🇿"), "64": ("New Zealand", "🇳🇿"),
-    "papua new guinea": ("Papua New Guinea", "🇵🇬"), "675": ("Papua New Guinea", "🇵🇬"),
-    "samoa": ("Samoa", "🇼🇸"), "685": ("Samoa", "🇼🇸"),
+    "algeria": ("Algeria", "🇩🇿"), "angola": ("Angola", "🇦🇴"), "benin": ("Benin", "🇧🇯"),
+    "botswana": ("Botswana", "🇧🇼"), "burkina faso": ("Burkina Faso", "🇧🇫"), "burundi": ("Burundi", "🇧🇮"),
+    "cameroon": ("Cameroon", "🇨🇲"), "chad": ("Chad", "🇹🇩"), "egypt": ("Egypt", "🇪🇬"),
+    "ethiopia": ("Ethiopia", "🇪🇹"), "ghana": ("Ghana", "🇬🇭"), "ivory coast": ("Ivory Coast", "🇨🇮"),
+    "kenya": ("Kenya", "🇰🇪"), "morocco": ("Morocco", "🇲🇦"), "nigeria": ("Nigeria", "🇳🇬"),
+    "south africa": ("South Africa", "🇿🇦"), "tanzania": ("Tanzania", "🇹🇿"), "uganda": ("Uganda", "🇺🇬"),
+    "cambodia": ("Cambodia", "🇰🇭"), "china": ("China", "🇨🇳"), "india": ("India", "🇮🇳"),
+    "indonesia": ("Indonesia", "🇮🇩"), "pakistan": ("Pakistan", "🇵🇰"), "philippines": ("Philippines", "🇵🇭"),
+    "saudi arabia": ("Saudi Arabia", "🇸🇦"), "singapore": ("Singapore", "🇸🇬"), "vietnam": ("Vietnam", "🇻🇳"),
+    "france": ("France", "🇫🇷"), "germany": ("Germany", "🇩🇪"), "italy": ("Italy", "🇮🇹"),
+    "russia": ("Russia", "🇷🇺"), "spain": ("Spain", "🇪🇸"), "ukraine": ("Ukraine", "🇺🇦"),
+    "united kingdom": ("United Kingdom", "🇬🇧"), "usa": ("United States", "🇺🇸"),
 }
 
 
@@ -436,60 +269,33 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     managed_ranges = db_get_managed_ranges()
+    custom_emojis = db_get_custom_emojis()
 
     ranges_list = []
     for r in managed_ranges:
-        emoji_disp = render_emoji(r.get("custom_emoji_id"), r.get("emoji_fallback", "🔹"))
-        ranges_list.append(f"• {r['flag']} {emoji_disp} <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)")
+        srv_icon = get_dynamic_icon(r['service'], "🔹")
+        flag_icon = get_dynamic_icon(r['country'], r['flag'])
+        ranges_list.append(f"• {flag_icon} {srv_icon} <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)")
 
     ranges_text = "\n".join(ranges_list) if ranges_list else "No active ranges configured."
+    
+    emojis_list = [f"• <b>{k}</b>: {render_emoji(v['emoji_id'], v['fallback'])}" for k, v in custom_emojis.items()]
+    emojis_text = "\n".join(emojis_list) if emojis_list else "No global custom emojis registered."
 
     admin_msg = (
-        f"🛠 <b>Admin Configuration Panel</b> 🛠\n\n"
-        f"📋 <b>Current Active Ranges (Stored in Database):</b>\n{ranges_text}\n\n"
-        f"👇 <i>Click below to add, update emojis, or manage ranges:</i>"
+        f"🛠 <b>Universal Admin Configuration Panel</b> 🛠\n\n"
+        f"📋 <b>Active Ranges:</b>\n{ranges_text}\n\n"
+        f"🎨 <b>Custom Global Emojis (Services, Flags, Labels):</b>\n{emojis_text}\n\n"
+        f"👇 <i>Manage your bot components below:</i>"
     )
 
     keyboard = [
-        [InlineKeyboardButton("➕ Add Range", callback_data="admin_add"), InlineKeyboardButton("🎭 Set Service Emoji", callback_data="admin_set_emoji")],
+        [InlineKeyboardButton("➕ Add Range", callback_data="admin_add"), InlineKeyboardButton("🎨 Set Global Emoji", callback_data="admin_set_global_emoji")],
         [InlineKeyboardButton("🗑 Delete Specific Range", callback_data="admin_delete_list"), InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
         [InlineKeyboardButton("🗑 Clear All Ranges", callback_data="admin_clear")],
     ]
 
     await update.message.reply_text(admin_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-async def set_emoji_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Command alternative: /setemoji Facebook [CustomEmoji_or_ID]"""
-    user_id = update.effective_user.id
-    if ADMIN_ID != 0 and user_id != ADMIN_ID:
-        return
-
-    message = update.message
-    args = context.args
-
-    if not args:
-        await message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/setemoji &lt;Service&gt; &lt;Paste Premium Emoji or Send ID&gt;</code>\n\n"
-            "Example: <code>/setemoji Facebook 📘</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    service_name = args[0]
-    emoji_id, fallback = extract_custom_emoji_id(message)
-
-    if not emoji_id:
-        await message.reply_text("❌ No custom emoji or valid numeric emoji ID detected in message.")
-        return
-
-    db_update_service_emoji(service_name, emoji_id, fallback)
-    preview = render_emoji(emoji_id, fallback)
-
-    await message.reply_text(
-        f"✅ <b>Updated Emoji for {service_name}!</b>\n\nPreview: {preview}",
-        parse_mode="HTML"
-    )
 
 
 async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -512,14 +318,14 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode="HTML",
         )
 
-    elif data == "admin_set_emoji":
+    elif data == "admin_set_global_emoji":
         await query.answer()
-        context.user_data["waiting_for_emoji_update"] = True
+        context.user_data["waiting_for_global_emoji"] = True
         await query.message.reply_text(
-            "🎭 <b>Set Service Premium Emoji</b>\n\n"
-            "Send the service name and paste/send your custom premium emoji or numeric emoji ID.\n\n"
-            "👉 <b>Format:</b> <code>Service | CustomEmoji</code>\n"
-            "👉 <b>Example:</b> <code>Facebook | 5323261730283863478</code> (or paste direct Telegram Premium Emoji)",
+            "🎨 <b>Set Any Global Emoji (Services, Flags, Labels)</b>\n\n"
+            "Send the keyword (e.g., <code>Facebook</code>, <code>Ivory Coast</code>, <code>🇨🇮</code>, or <code>Get Number</code>) and paste/send your custom premium emoji or numeric ID.\n\n"
+            "👉 <b>Format:</b> <code>Keyword | CustomEmoji</code>\n"
+            "👉 <b>Example:</b> <code>Ivory Coast | 5323261730283863478</code>",
             parse_mode="HTML",
         )
 
@@ -554,8 +360,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         context.user_data["waiting_for_broadcast"] = True
         await query.message.reply_text(
-            "📢 <b>Send the message you want to broadcast.</b>\n\n"
-            "It will be sent to all bot users and posted directly to your OTP channel!",
+            "📢 <b>Send the message you want to broadcast.</b>",
             parse_mode="HTML",
         )
 
@@ -568,7 +373,10 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await cmd_admin(update, context)
 
 
-async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Step-by-Step Order Flow Handlers ---
+
+async def service_select_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 1: User selected a service, now show available countries for that service."""
     query = update.callback_query
     await query.answer()
     
@@ -579,20 +387,71 @@ async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT
     service_name = data.replace("srv_", "")
     managed_ranges = db_get_managed_ranges()
     
-    target_range = next((r for r in managed_ranges if r["service"].lower() == service_name.lower()), None)
+    # Filter ranges matching this service
+    service_ranges = [r for r in managed_ranges if r["service"].lower() == service_name.lower()]
     
+    if not service_ranges:
+        await query.message.edit_text("❌ No countries configured for this service.")
+        return
+        
+    srv_icon = get_dynamic_icon(service_name, "🛡️")
+    
+    keyboard = []
+    for r in service_ranges:
+        country_name = r["country"]
+        flag_icon = get_dynamic_icon(country_name, r.get("flag", "🌐"))
+        # callback stores service and range id or unique key
+        range_id = r.get("id", r["range"])
+        keyboard.append([InlineKeyboardButton(f"{flag_icon} {country_name}", callback_data=f"cnt_{service_name}_{range_id}")])
+        
+    keyboard.append([InlineKeyboardButton("🔙 Back to Services", callback_data="back_to_services")])
+    
+    await query.message.edit_text(
+        f"{srv_icon} <b>Service: {service_name}</b>\n\n🌍 <b>Select a Country:</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def country_select_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: User selected country, now fetch number using the range."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if not data.startswith("cnt_"):
+        return
+        
+    parts = data.replace("cnt_", "", 1).split("_", 1)
+    if len(parts) < 2:
+        return
+    service_name, target_key = parts[0], parts[1]
+    
+    managed_ranges = db_get_managed_ranges()
+    target_range = None
+    for r in managed_ranges:
+        if str(r.get("id", r["range"])) == target_key and r["service"].lower() == service_name.lower():
+            target_range = r
+            break
+            
     if not target_range:
-        await query.message.edit_text("❌ No range configured for this service.")
+        # Fallback search by range value or name match
+        target_range = next((r for r in managed_ranges if r["service"].lower() == service_name.lower()), None)
+        
+    if not target_range:
+        await query.message.edit_text("❌ Selected range configuration not found.")
         return
         
     range_val = target_range["range"]
-    flag = target_range.get("flag", "🌐")
+    country_name = target_range.get("country", "Unknown")
     
-    await query.message.edit_text(f"⏳ Fetching number for <b>{service_name}</b>...", parse_mode="HTML")
+    srv_icon = get_dynamic_icon(service_name, "🛡️")
+    flag_icon = get_dynamic_icon(country_name, target_range.get("flag", "🌐"))
+    
+    await query.message.edit_text(f"⏳ Fetching number for {srv_icon} <b>{service_name}</b> ({flag_icon} {country_name})...", parse_mode="HTML")
     
     response = await zebra.get_number(range_val)
     
-    # Check if the API successfully returned a number
     meta = response.get("meta", {})
     if meta.get("code") == 0:
         res_data = response.get("data", {})
@@ -601,18 +460,18 @@ async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT
         if rows:
             number_info = rows[0]
             phone_number = number_info.get("number")
-            country_name = number_info.get("country", target_range.get("country", "Unknown"))
+            resolved_country = number_info.get("country", country_name)
             
-            # Format the output message to match your target layout
             msg_text = (
                 f"✅ <b>Number Allocated Successfully!</b>\n\n"
+                f"{srv_icon} <b>Service:</b> {service_name}\n"
                 f"📱 <b>Number:</b> <code>{phone_number}</code>\n"
-                f"{flag} <b>Country:</b> {country_name}"
+                f"{flag_icon} <b>Country:</b> {resolved_country}"
             )
             
-            # Action buttons matching your screenshot layout
             keyboard = [
-                [InlineKeyboardButton("🔄 Change Number", callback_data=f"srv_{service_name}")],
+                [InlineKeyboardButton("🔄 Change Number", callback_data=f"cnt_{service_name}_{target_key}")],
+                [InlineKeyboardButton("🔙 Choose Another Service", callback_data="back_to_services")],
             ]
             if CHANNEL_URL:
                 keyboard.append([InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)])
@@ -620,13 +479,33 @@ async def service_callback_handler(update: Update, context: ContextTypes.DEFAULT
             await query.message.edit_text(msg_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
-    # Fallback if API returned an error or empty rows
     error_msg = meta.get("error") or "Unknown error or out of stock."
     await query.message.edit_text(
-        f"❌ <b>Failed to fetch number for {service_name}.</b>\n\nReason: <code>{error_msg}</code>",
+        f"❌ <b>Failed to fetch number.</b>\n\nReason: <code>{error_msg}</code>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Services", callback_data="back_to_services")]])
     )
+
+
+async def back_to_services_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Brings user back to the main service list menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    managed_ranges = db_get_managed_ranges()
+    if not managed_ranges:
+        await query.message.edit_text("⚠️ No ranges available.")
+        return
+
+    # Get unique services
+    unique_services = sorted(list(set(r["service"] for r in managed_ranges)))
+    
+    keyboard = []
+    for srv in unique_services:
+        srv_icon = get_dynamic_icon(srv, "🛡️")
+        keyboard.append([InlineKeyboardButton(f"{srv_icon} {srv}", callback_data=f"srv_{srv}")])
+
+    await query.message.edit_text("🛠 <b>Select a Service:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 # --- User Handlers ---
@@ -662,14 +541,14 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ <b>Saved Range:</b> <code>{service}</code> | <code>{c_name}</code> | <code>{range_val}</code>", parse_mode="HTML")
         return
 
-    # 2. Handle Admin Setting Emoji Interactive Prompt
-    if context.user_data.get("waiting_for_emoji_update"):
+    # 2. Handle Setting Any Global Emoji (Services, Flags, Labels)
+    if context.user_data.get("waiting_for_global_emoji"):
         if "|" not in text:
-            await update.message.reply_text("⚠️ <b>Format Error!</b> Send: <code>Service | PremiumEmoji_or_ID</code>", parse_mode="HTML")
+            await update.message.reply_text("⚠️ <b>Format Error!</b> Send: <code>Keyword | PremiumEmoji_or_ID</code>", parse_mode="HTML")
             return
 
         parts = [p.strip() for p in text.split("|", 1)]
-        service_name = parts[0]
+        keyword = parts[0]
 
         emoji_id, fallback = extract_custom_emoji_id(update.message)
 
@@ -677,12 +556,12 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("❌ No custom premium emoji or valid emoji ID detected in message.")
             return
 
-        db_update_service_emoji(service_name, emoji_id, fallback)
-        context.user_data["waiting_for_emoji_update"] = False
+        db_set_custom_emoji(keyword, emoji_id, fallback)
+        context.user_data["waiting_for_global_emoji"] = False
 
         preview = render_emoji(emoji_id, fallback)
         await update.message.reply_text(
-            f"✅ <b>Updated Emoji for {service_name}!</b>\n\nPreview: {preview}",
+            f"✅ <b>Successfully Mapped Global Emoji for '{keyword}'!</b>\n\nPreview: {preview}",
             parse_mode="HTML"
         )
         return
@@ -711,11 +590,10 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ <b>Broadcast Sent!</b> Delivered to {success_count} users and channel.", parse_mode="HTML")
         return
 
-    # 4. Handle Main Menu Options
+    # 4. Handle Main Menu "Get Number" Option (Step 1: Service Selection)
     if "Get Number" in text:
-        # Clear leftover admin states to prevent input traps
         context.user_data["waiting_for_range"] = False
-        context.user_data["waiting_for_emoji_update"] = False
+        context.user_data["waiting_for_global_emoji"] = False
         context.user_data["waiting_for_broadcast"] = False
         
         managed_ranges = db_get_managed_ranges()
@@ -723,36 +601,28 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("⚠️ No ranges available.", reply_markup=get_main_keyboard())
             return
 
-        services_map = {}
-        for r in managed_ranges:
-            srv = r["service"]
-            e_id = r.get("custom_emoji_id")
-            fallback = r.get("emoji_fallback", "🛡️")
-            services_map[srv] = (e_id, fallback)
-
+        unique_services = sorted(list(set(r["service"] for r in managed_ranges)))
+        
         keyboard = []
-        for srv, (e_id, fallback) in services_map.items():
-            icon = render_emoji(e_id, fallback) if e_id else fallback
-            keyboard.append([InlineKeyboardButton(f"{icon} {srv}", callback_data=f"srv_{srv}")])
+        for srv in unique_services:
+            srv_icon = get_dynamic_icon(srv, "🛡️")
+            keyboard.append([InlineKeyboardButton(f"{srv_icon} {srv}", callback_data=f"srv_{srv}")])
 
         await update.message.reply_text("🛠 <b>Select a Service:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
 
-async def post_init(application):
-    pass
-
-
 if __name__ == "__main__":
     keep_alive()
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", cmd_admin))
-    app.add_handler(CommandHandler("setemoji", set_emoji_command))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|del_range_)"))
-    app.add_handler(CallbackQueryHandler(service_callback_handler, pattern="^srv_"))
+    app.add_handler(CallbackQueryHandler(service_select_callback_handler, pattern="^srv_"))
+    app.add_handler(CallbackQueryHandler(country_select_callback_handler, pattern="^cnt_"))
+    app.add_handler(CallbackQueryHandler(back_to_services_callback_handler, pattern="^back_to_services$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
     print("🤖 Bot running...")
