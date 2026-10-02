@@ -55,6 +55,28 @@ DEFAULT_RANGES = [
 
 # --- Database Helper Functions ---
 
+def db_add_user(user_id: int):
+    """Save active users for admin broadcasting."""
+    if not supabase:
+        return
+    try:
+        supabase.table("users").upsert({"user_id": user_id}, on_conflict="user_id").execute()
+    except Exception as e:
+        logging.error(f"Error saving user to Supabase: {e}")
+
+
+def db_get_all_users() -> list:
+    """Retrieve all user IDs for broadcasting."""
+    if not supabase:
+        return []
+    try:
+        response = supabase.table("users").select("user_id").execute()
+        return [row["user_id"] for row in response.data] if response.data else []
+    except Exception as e:
+        logging.error(f"Error fetching users for broadcast: {e}")
+        return []
+
+
 def db_get_managed_ranges() -> list:
     if not supabase:
         return DEFAULT_RANGES
@@ -81,6 +103,15 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
         logging.error(f"Error inserting range to Supabase: {e}")
+
+
+def db_delete_specific_range(range_val: str):
+    if not supabase:
+        return
+    try:
+        supabase.table("managed_ranges").delete().eq("range", range_val).execute()
+    except Exception as e:
+        logging.error(f"Error deleting range from Supabase: {e}")
 
 
 def db_clear_managed_ranges():
@@ -421,11 +452,11 @@ async def auto_check_updates(app):
                     rows = res.get("data", {}).get("rows", [])
                     for row in rows:
                         target_number = row.get("number")
-                        timestamp = row.get("at_ms")
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        msg_id = f"{target_number}_{timestamp}_{msg_text}"
+                        # Deduplication ID constructed without timestamp to prevent duplicate sends on polling
+                        msg_id = f"{target_number}_{msg_text}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
                             seen_messages.clear()
@@ -446,11 +477,14 @@ async def auto_check_updates(app):
                                 f"👤 *Sender:* `{sender}`\n"
                                 f"🔑 *Code:* `{code}`"
                             )
-                            await app.bot.send_message(
-                                chat_id=user_chat_id,
-                                text=dm_text,
-                                parse_mode="Markdown",
-                            )
+                            try:
+                                await app.bot.send_message(
+                                    chat_id=user_chat_id,
+                                    text=dm_text,
+                                    parse_mode="Markdown",
+                                )
+                            except Exception as e:
+                                logging.error(f"Error sending DM to {user_chat_id}: {e}")
 
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
@@ -502,13 +536,17 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_msg = (
         f"🛠 **Admin Configuration Panel** 🛠\n\n"
         f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add or manage ranges:*"
+        f"👇 *Click below to add, delete, or broadcast messages:*"
     )
 
     keyboard = [
         [
             InlineKeyboardButton("➕ Add Range", callback_data="admin_add"),
-            InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear"),
+            InlineKeyboardButton("🗑 Delete Range", callback_data="admin_delete_select"),
+        ],
+        [
+            InlineKeyboardButton("📢 Broadcast Msg", callback_data="admin_broadcast"),
+            InlineKeyboardButton("⚠️ Clear All Ranges", callback_data="admin_clear"),
         ]
     ]
 
@@ -529,12 +567,51 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "admin_add":
         await query.answer()
         context.user_data["waiting_for_range"] = True
+        context.user_data["waiting_for_broadcast"] = False
         await query.message.reply_text(
             "✍ **Send the configuration in this format:**\n\n"
             "`Service | Country | Range`\n\n"
             "👉 *Example:* `Facebook | Cambodia | 85531879XXX`",
             parse_mode="Markdown",
         )
+    elif data == "admin_delete_select":
+        await query.answer()
+        managed_ranges = db_get_managed_ranges()
+        if not managed_ranges:
+            await query.edit_message_text("❌ No active ranges found to delete.")
+            return
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"❌ Delete {r['flag']} {r['service']} ({r['range']})",
+                    callback_data=f"admin_del_{r['range']}"
+                )
+            ]
+            for r in managed_ranges
+        ]
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="admin_back")])
+
+        await query.edit_message_text(
+            "🗑 **Select a specific range to delete:**",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("admin_del_"):
+        range_to_del = data.replace("admin_del_", "")
+        db_delete_specific_range(range_to_del)
+        await query.answer(f"Deleted range {range_to_del}", show_alert=True)
+        await query.edit_message_text(f"✅ **Range `{range_to_del}` deleted successfully.**", parse_mode="Markdown")
+
+    elif data == "admin_broadcast":
+        await query.answer()
+        context.user_data["waiting_for_broadcast"] = True
+        context.user_data["waiting_for_range"] = False
+        await query.message.reply_text(
+            "📢 **Send the message text you wish to broadcast to all bot users:**",
+            parse_mode="Markdown"
+        )
+
     elif data == "admin_clear":
         db_clear_managed_ranges()
         await query.answer("All ranges cleared from database!", show_alert=True)
@@ -643,7 +720,11 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_name = update.effective_user.first_name or "User"
+    
+    # Track user ID for broadcast messaging
+    db_add_user(user_id)
     
     welcome_msg = (
         f"👋 *ANU PREMIUM OTP BOT*\n\n"
@@ -685,6 +766,32 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="Markdown",
             reply_markup=get_main_keyboard(),
         )
+        return
+
+    if context.user_data.get("waiting_for_broadcast"):
+        context.user_data["waiting_for_broadcast"] = False
+        all_users = db_get_all_users()
+        
+        # Include current active chat ID if user list is empty
+        if not all_users:
+            all_users = [user_chat_id]
+
+        status_msg = await update.message.reply_text(f"⏳ Sending broadcast message to {len(all_users)} users...")
+        
+        success, failed = 0, 0
+        for uid in all_users:
+            try:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=f"📢 **ANNOUNCEMENT** 📢\n\n{text}",
+                    parse_mode="Markdown"
+                )
+                success += 1
+            except Exception as e:
+                failed += 1
+                logging.error(f"Failed to broadcast to {uid}: {e}")
+
+        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
         return
 
     if "Get Number" in text:
