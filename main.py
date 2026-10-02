@@ -72,10 +72,10 @@ DEFAULT_RANGES = [
 # --- Custom Emoji Helper Functions ---
 
 def extract_custom_emoji_id(message) -> tuple[str, str]:
-    """Extracts custom emoji ID and fallback character from message entities or numeric input."""
+    """Extracts custom emoji ID and fallback character from message entities or raw text."""
     text = message.text.strip() if message.text else ""
-    
-    # Check if message contains custom_emoji entity from Telegram Premium
+
+    # 1. Check if message contains a custom_emoji entity from Telegram Premium
     if message.entities:
         for entity in message.entities:
             if entity.type == "custom_emoji":
@@ -83,12 +83,22 @@ def extract_custom_emoji_id(message) -> tuple[str, str]:
                 fallback = text[entity.offset : entity.offset + entity.length]
                 return emoji_id, fallback
 
-    # Check context args / split text if sent as numeric ID (e.g. "5368324170671202286 📘")
-    tokens = text.split()
-    for token in tokens:
-        if token.isdigit() and len(token) > 10:
-            fallback = tokens[-1] if len(tokens) > 1 and not tokens[-1].isdigit() else "🔹"
-            return token, fallback
+    # 2. Extract numeric ID when using "Service | NumericID" format
+    if "|" in text:
+        parts = [p.strip() for p in text.split("|", 1)]
+        if len(parts) > 1:
+            val = parts[1]
+            match = re.search(r"\b(\d{10,})\b", val)
+            if match:
+                emoji_id = match.group(1)
+                remainder = val.replace(emoji_id, "").strip()
+                fallback = remainder if remainder else "📘"
+                return emoji_id, fallback
+
+    # 3. Fallback: search for any standalone 10+ digit numeric ID in message
+    match = re.search(r"\b(\d{10,})\b", text)
+    if match:
+        return match.group(1), "📘"
 
     return None, None
 
@@ -364,7 +374,7 @@ COUNTRY_FLAG_MAP = {
     "paraguay": ("Paraguay", "🇵🇾"), "595": ("Paraguay", "🇵🇾"),
     "peru": ("Peru", "🇵🇪"), "51": ("Peru", "🇵🇪"),
     "suriname": ("Suriname", "🇸🇷"), "597": ("Suriname", "🇸🇷"),
-    "trinidad": ("Trinidad and Tobago", "🇹TT"), "1868": ("Trinidad and Tobago", "🇹🇹"),
+    "trinidad": ("Trinidad and Tobago", "🇹🇹"), "1868": ("Trinidad and Tobago", "🇹🇹"),
     "usa": ("United States", "🇺🇸"), "united states": ("United States", "🇺🇸"), "us": ("United States", "🇺🇸"),
     "uruguay": ("Uruguay", "🇺🇾"), "598": ("Uruguay", "🇺🇾"),
     "venezuela": ("Venezuela", "🇻🇪"), "58": ("Venezuela", "🇻🇪"),
@@ -509,7 +519,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             "🎭 <b>Set Service Premium Emoji</b>\n\n"
             "Send the service name and paste/send your custom premium emoji or numeric emoji ID.\n\n"
             "👉 <b>Format:</b> <code>Service | CustomEmoji</code>\n"
-            "👉 <b>Example:</b> <code>Facebook | 📘</code> (or paste direct Telegram Premium Emoji)",
+            "👉 <b>Example:</b> <code>Facebook | 5323261730283863478</code> (or paste direct Telegram Premium Emoji)",
             parse_mode="HTML",
         )
 
