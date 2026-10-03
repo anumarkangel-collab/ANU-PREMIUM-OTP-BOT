@@ -712,7 +712,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     managed_ranges = db_get_managed_ranges()
 
     if data.startswith("srv_"):
-        selected_service = data.replace("srv_", "")
+        selected_service = data[4:]
         matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
 
         keyboard = [
@@ -736,7 +736,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         await query.answer()
         
         is_change_request = data.startswith("change_")
-        selected_range = data.replace("prov_", "").replace("change_", "")
+        selected_range = data[7:] if is_change_request else data[5:]
         matched_item = next((r for r in managed_ranges if r["range"] == selected_range), {})
         
         c_name, flag_icon = auto_detect_country_and_flag(
@@ -840,7 +840,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠️️ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
