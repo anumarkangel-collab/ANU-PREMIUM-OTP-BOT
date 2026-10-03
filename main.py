@@ -762,6 +762,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         allocated_numbers = await request_multiple_numbers(selected_range, count=2)
 
         if allocated_numbers:
+            nums_text = "\n".join([f"• `{num}`" for num in allocated_numbers])
+            
             final_country_name, final_flag = auto_detect_country_and_flag(
                 matched_item.get("country", c_name), allocated_numbers[0]
             )
@@ -773,28 +775,25 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                     "flag": final_flag,
                 }
 
-            # Format numbers inside Telegram code-blocks (` `) so users can tap/click to copy natively
-            numbers_formatted = "\n".join([f"`{num}`" for num in allocated_numbers])
-
             msg = (
                 f"✅ **Numbers Allocated Successfully!**\n\n"
-                f"{final_flag} **Country:** {final_country_name}\n\n"
-                f"📱 **Tap any number below to copy:**\n"
-                f"{numbers_formatted}"
+                f"📱 **Numbers:**\n{nums_text}\n\n"
+                f"{final_flag} **Country:** {final_country_name}"
             )
 
-            keyboard_rows = [
-                [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
-                [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)]
-            ]
-            keyboard = InlineKeyboardMarkup(keyboard_rows)
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
+                ]
+            )
 
             if is_change_request:
                 await loading_msg.edit_text(
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
             else:
-                await query.edit_text(
+                await query.edit_message_text(
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
         else:
@@ -841,7 +840,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠️️ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
