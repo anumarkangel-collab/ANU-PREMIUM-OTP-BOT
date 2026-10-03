@@ -385,11 +385,10 @@ async def is_user_subscribed(bot, user_id: int) -> bool:
         return False
     except Exception as e:
         logging.error(f"Force Join Check Error: {e}")
-        return True  # Fallback to allow usage if bot lacks permissions in the channel
+        return True
 
 
 async def prompt_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a message asking the user to join the Method channel before using the bot."""
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📚 Join Method Channel", url=METHOD_CHANNEL_URL)],
         [InlineKeyboardButton("✅ I Have Joined", callback_data="check_subscription")]
@@ -840,7 +839,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     db_add_user(user_chat_id)
 
-    # Force Join Check for all regular user messages
     if not await is_user_subscribed(context.bot, user_id):
         await prompt_force_join(update, context)
         return
