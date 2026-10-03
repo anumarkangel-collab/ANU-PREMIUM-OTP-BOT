@@ -52,6 +52,19 @@ DEFAULT_RANGES = [
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
 
+# Fallback default Emoji IDs
+DEFAULT_EMOJIS = {
+    "get_number": "5341512132333069123",
+    "active_engine": "5341512132333069124",
+    "live_feed": "5341512132333069125",
+    "referrals": "5341512132333069126",
+    "my_profile": "5341512132333069127",
+    "support_hub": "5341512132333069128",
+    "admin_add": "5341512132333069129",
+    "admin_delete": "5341512132333069130",
+    "admin_broadcast": "5341512132333069131",
+    "admin_clear": "5341512132333069132"
+}
 
 # --- Database Helper Functions ---
 
@@ -121,6 +134,39 @@ def db_clear_managed_ranges():
         supabase.table("managed_ranges").delete().neq("id", 0).execute()
     except Exception as e:
         logging.error(f"Error clearing ranges from Supabase: {e}")
+
+
+# --- Premium Emoji Database Helpers ---
+
+def db_get_emojis() -> dict:
+    if not supabase:
+        return DEFAULT_EMOJIS
+    try:
+        response = supabase.table("premium_emojis").select("*").execute()
+        if response.data:
+            return {row["key"]: row["emoji_id"] for row in response.data}
+        return DEFAULT_EMOJIS
+    except Exception as e:
+        logging.error(f"Error fetching emojis from Supabase: {e}")
+        return DEFAULT_EMOJIS
+
+
+def db_set_emoji(key: str, emoji_id: str):
+    if not supabase:
+        return
+    try:
+        supabase.table("premium_emojis").upsert({"key": key, "emoji_id": emoji_id}, on_conflict="key").execute()
+    except Exception as e:
+        logging.error(f"Error saving emoji ID to Supabase: {e}")
+
+
+def get_emoji(key: str, fallback_icon: str = "✨") -> str:
+    """Renders custom Telegram Premium emoji HTML tag."""
+    emojis = db_get_emojis()
+    emoji_id = emojis.get(key)
+    if emoji_id:
+        return f'<tg-emoji emoji-id="{emoji_id}">{fallback_icon}</tg-emoji>'
+    return fallback_icon
 
 
 # --- Comprehensive World Country & Flag Map ---
@@ -309,7 +355,7 @@ COUNTRY_FLAG_MAP = {
     "paraguay": ("Paraguay", "🇵🇾"), "595": ("Paraguay", "🇵🇾"),
     "peru": ("Peru", "🇵🇪"), "51": ("Peru", "🇵🇪"),
     "suriname": ("Suriname", "🇸🇷"), "597": ("Suriname", "🇸🇷"),
-    "trinidad": ("Trinidad and Tobago", "🇹TT"), "1868": ("Trinidad and Tobago", "🇹🇹"),
+    "trinidad": ("Trinidad and Tobago", "🇹🇹"), "1868": ("Trinidad and Tobago", "🇹🇹"),
     "usa": ("United States", "🇺🇸"), "united states": ("United States", "🇺🇸"), "us": ("United States", "🇺🇸"),
     "uruguay": ("Uruguay", "🇺🇾"), "598": ("Uruguay", "🇺🇾"),
     "venezuela": ("Venezuela", "🇻🇪"), "58": ("Venezuela", "🇻🇪"),
@@ -336,13 +382,12 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     text_clean = (country_text or "").strip().lower()
     digits_only = re.sub(r"\D", "", phone_or_range or "")
 
-    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
+    # 1. First Priority: Direct match on the text name
     for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
         if not key.isdigit() and key == text_clean:
             return c_name, flag
 
-    # 2. Second Priority: Match exact calling prefix at the START of digits_only
-    # Sort numeric keys by length descending (longest prefix first)
+    # 2. Second Priority: Match exact calling prefix
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -432,30 +477,30 @@ async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     masked_num = mask_phone_number(dummy_number)
 
     dm_text = (
-        "📩 *[TEST] Verification Code Received!*\n\n"
-        f"📱 *To Number:* `{dummy_number}`\n"
-        f"👤 *Sender:* `{dummy_sender}`\n"
-        f"🔑 *Code:* `{code}`"
+        "📩 <b>[TEST] Verification Code Received!</b>\n\n"
+        f"📱 <b>To Number:</b> <code>{dummy_number}</code>\n"
+        f"👤 <b>Sender:</b> <code>{dummy_sender}</code>\n"
+        f"🔑 <b>Code:</b> <code>{code}</code>"
     )
-    await update.message.reply_text(dm_text, parse_mode="Markdown")
+    await update.message.reply_text(dm_text, parse_mode="HTML")
 
     if CHANNEL_CHAT_ID:
         channel_text = (
-            "📢 *New SMS Received*\n\n"
-            f"📱 *To Number:* `{masked_num}`\n"
-            f"{flag_icon} *Country:* {country_name}\n"
-            f"👤 *Sender:* `{dummy_sender}`\n"
-            f"💬 *Full Message:* `{dummy_message}`"
+            "📢 <b>New SMS Received</b>\n\n"
+            f"📱 <b>To Number:</b> <code>{masked_num}</code>\n"
+            f"{flag_icon} <b>Country:</b> {country_name}\n"
+            f"👤 <b>Sender:</b> <code>{dummy_sender}</code>\n"
+            f"💬 <b>Full Message:</b> <code>{dummy_message}</code>"
         )
         try:
             await context.bot.send_message(
                 chat_id=CHANNEL_CHAT_ID,
                 text=channel_text,
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             await update.message.reply_text("✅ Test message successfully sent to Channel!")
         except Exception as err:
-            await update.message.reply_text(f"❌ Failed to send to Channel: `{err}`", parse_mode="Markdown")
+            await update.message.reply_text(f"❌ Failed to send to Channel: <code>{err}</code>", parse_mode="HTML")
 
 
 async def auto_check_updates(app):
@@ -472,7 +517,6 @@ async def auto_check_updates(app):
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        # Deduplication ID constructed without timestamp to prevent duplicate sends on polling
                         msg_id = f"{target_number}_{msg_text}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
@@ -489,33 +533,33 @@ async def auto_check_updates(app):
                             masked_num = mask_phone_number(target_number)
 
                             dm_text = (
-                                "📩 *Verification Code Received!*\n\n"
-                                f"📱 *To Number:* `{target_number}`\n"
-                                f"👤 *Sender:* `{sender}`\n"
-                                f"🔑 *Code:* `{code}`"
+                                "📩 <b>Verification Code Received!</b>\n\n"
+                                f"📱 <b>To Number:</b> <code>{target_number}</code>\n"
+                                f"👤 <b>Sender:</b> <code>{sender}</code>\n"
+                                f"🔑 <b>Code:</b> <code>{code}</code>"
                             )
                             try:
                                 await app.bot.send_message(
                                     chat_id=user_chat_id,
                                     text=dm_text,
-                                    parse_mode="Markdown",
+                                    parse_mode="HTML",
                                 )
                             except Exception as e:
                                 logging.error(f"Error sending DM to {user_chat_id}: {e}")
 
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
-                                    "📢 *New SMS Received*\n\n"
-                                    f"📱 *To Number:* `{masked_num}`\n"
-                                    f"{flag_icon} *Country:* {country_name}\n"
-                                    f"👤 *Sender:* `{sender}`\n"
-                                    f"💬 *Full Message:* `{msg_text}`"
+                                    "📢 <b>New SMS Received</b>\n\n"
+                                    f"📱 <b>To Number:</b> <code>{masked_num}</code>\n"
+                                    f"{flag_icon} <b>Country:</b> {country_name}\n"
+                                    f"👤 <b>Sender:</b> <code>{sender}</code>\n"
+                                    f"💬 <b>Full Message:</b> <code>{msg_text}</code>"
                                 )
                                 try:
                                     await app.bot.send_message(
                                         chat_id=CHANNEL_CHAT_ID,
                                         text=channel_text,
-                                        parse_mode="Markdown",
+                                        parse_mode="HTML",
                                     )
                                 except Exception as err:
                                     logging.error(f"Failed to post to channel: {err}")
@@ -538,22 +582,22 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if ADMIN_ID != 0 and user_id != ADMIN_ID:
-        await update.message.reply_text(f"⛔ **Access Denied:** Your Telegram ID `{user_id}` is not configured as admin.", parse_mode="Markdown")
+        await update.message.reply_text(f"⛔ <b>Access Denied:</b> Your Telegram ID <code>{user_id}</code> is not configured as admin.", parse_mode="HTML")
         return
 
     managed_ranges = db_get_managed_ranges()
 
     ranges_text = "\n".join(
         [
-            f"• {r['flag']} 🔹 **[{r['service']}]** {r['country']} (`{r['range']}`)"
+            f"• {r['flag']} 🔹 <b>[{r['service']}]</b> {r['country']} (<code>{r['range']}</code>)"
             for r in managed_ranges
         ]
     ) or "No active ranges configured."
 
     admin_msg = (
-        f"🛠 **Admin Configuration Panel** 🛠\n\n"
-        f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add, delete, or broadcast messages:*"
+        f"🛠 <b>Admin Configuration Panel</b> 🛠\n\n"
+        f"📋 <b>Current Active Ranges (Stored in Database):</b>\n{ranges_text}\n\n"
+        f"👇 <i>Click below to manage ranges, emojis, or broadcast messages:</i>"
     )
 
     keyboard = [
@@ -562,13 +606,16 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select"),
         ],
         [
+            InlineKeyboardButton("✨ Manage Emojis 🌟", callback_data="admin_emojis"),
             InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast"),
+        ],
+        [
             InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear"),
         ]
     ]
 
     await update.message.reply_text(
-        admin_msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
+        admin_msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
@@ -585,11 +632,12 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer()
         context.user_data["waiting_for_range"] = True
         context.user_data["waiting_for_broadcast"] = False
+        context.user_data["waiting_for_emoji"] = False
         await query.message.reply_text(
-            "✍ **Send the configuration in this format:**\n\n"
-            "`Service | Country | Range`\n\n"
-            "👉 *Example:* `Facebook | Cambodia | 85531879XXX`",
-            parse_mode="Markdown",
+            "✍ <b>Send the configuration in this format:</b>\n\n"
+            "<code>Service | Country | Range</code>\n\n"
+            "👉 <i>Example:</i> <code>Facebook | Cambodia | 85531879XXX</code>",
+            parse_mode="HTML",
         )
     elif data == "admin_delete_select":
         await query.answer()
@@ -610,29 +658,67 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back")])
 
         await query.edit_message_text(
-            "🗑 **Select a specific range to delete:**",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "🗑 <b>Select a specific range to delete:</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
         )
 
     elif data.startswith("admin_del_"):
         range_to_del = data.replace("admin_del_", "")
         db_delete_specific_range(range_to_del)
         await query.answer(f"Deleted range {range_to_del}", show_alert=True)
-        await query.edit_message_text(f"✅ **Range `{range_to_del}` deleted successfully.**", parse_mode="Markdown")
+        await query.edit_message_text(f"✅ <b>Range <code>{range_to_del}</code> deleted successfully.</b>", parse_mode="HTML")
+
+    elif data == "admin_emojis":
+        await query.answer()
+        emojis = db_get_emojis()
+        emoji_list = "\n".join([f"• <b>{k}</b>: <code>{v}</code>" for k, v in emojis.items()])
+        
+        keyboard = [
+            [InlineKeyboardButton(f"✏️ Set {k}", callback_data=f"emoji_set_{k}")]
+            for k in emojis.keys()
+        ]
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="admin_back")])
+
+        await query.edit_message_text(
+            f"✨ <b>Telegram Premium Emoji ID Manager</b> ✨\n\n"
+            f"Current Configured Emojis:\n{emoji_list}\n\n"
+            f"Select an emoji key to upload/update its Custom Emoji ID:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("emoji_set_"):
+        await query.answer()
+        emoji_key = data.replace("emoji_set_", "")
+        context.user_data["waiting_for_emoji"] = emoji_key
+        context.user_data["waiting_for_range"] = False
+        context.user_data["waiting_for_broadcast"] = False
+        
+        await query.message.reply_text(
+            f"✍ Send the Telegram Custom Premium Emoji ID for key: <b>{emoji_key}</b>\n\n"
+            f"<i>Example ID:</i> <code>5341512132333069123</code>",
+            parse_mode="HTML"
+        )
 
     elif data == "admin_broadcast":
         await query.answer()
         context.user_data["waiting_for_broadcast"] = True
         context.user_data["waiting_for_range"] = False
+        context.user_data["waiting_for_emoji"] = False
         await query.message.reply_text(
-            "📢 **Send the message text you wish to broadcast to all bot users:**",
-            parse_mode="Markdown"
+            "📢 <b>Send the message text you wish to broadcast to all bot users:</b>",
+            parse_mode="HTML"
         )
 
     elif data == "admin_clear":
         db_clear_managed_ranges()
         await query.answer("All ranges cleared from database!", show_alert=True)
-        await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
+        await query.edit_message_text("🗑 <b>All configured ranges have been cleared from database.</b>", parse_mode="HTML")
+
+    elif data == "admin_back":
+        await query.answer()
+        await cmd_admin(update, context)
 
 
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -656,9 +742,9 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         ]
 
         await query.edit_message_text(
-            f"🛠 **Selected Service:** `{selected_service}`\n\n"
-            f"👇 **Select Country / Range to allocate your number:**",
-            parse_mode="Markdown",
+            f"🛠 <b>Selected Service:</b> <code>{selected_service}</code>\n\n"
+            f"👇 <b>Select Country / Range to allocate your number:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
@@ -681,12 +767,13 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             loading_msg = await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"⏳ Requesting new number for {flag_icon} range `{selected_range}`...",
-                parse_mode="Markdown",
+                text=f"⏳ Requesting new number for {flag_icon} range <code>{selected_range}</code>...",
+                parse_mode="HTML",
             )
         else:
             await query.edit_message_text(
-                f"⏳ Requesting number for {flag_icon} range `{selected_range}`..."
+                f"⏳ Requesting number for {flag_icon} range <code>{selected_range}</code>...",
+                parse_mode="HTML"
             )
 
         res = await zebra.get_number(selected_range)
@@ -707,9 +794,9 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             }
 
             msg = (
-                f"✅ **Number Allocated Successfully!**\n\n"
-                f"📱 **Number:** `{allocated_num}`\n"
-                f"{final_flag} **Country:** {final_country_name}"
+                f"✅ <b>Number Allocated Successfully!</b>\n\n"
+                f"📱 <b>Number:</b> <code>{allocated_num}</code>\n"
+                f"{final_flag} <b>Country:</b> {final_country_name}"
             )
 
             keyboard = InlineKeyboardMarkup(
@@ -721,20 +808,20 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             if is_change_request:
                 await loading_msg.edit_text(
-                    msg, parse_mode="Markdown", reply_markup=keyboard
+                    msg, parse_mode="HTML", reply_markup=keyboard
                 )
             else:
                 await query.edit_message_text(
-                    msg, parse_mode="Markdown", reply_markup=keyboard
+                    msg, parse_mode="HTML", reply_markup=keyboard
                 )
         else:
             err_msg = res.get("message") or meta.get("error") or "Unknown error"
-            msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
+            msg = f"❌ <b>Failed to allocate number:</b>\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
             if is_change_request:
-                await loading_msg.edit_text(msg, parse_mode="Markdown")
+                await loading_msg.edit_text(msg, parse_mode="HTML")
             else:
-                await query.edit_message_text(msg, parse_mode="Markdown")
+                await query.edit_message_text(msg, parse_mode="HTML")
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -745,12 +832,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_add_user(user_id)
     
     welcome_msg = (
-        f"👋 *ANU PREMIUM OTP BOT*\n\n"
-        f"Welcome, *{user_name}*! 👋\n\n"
+        f"👋 {get_emoji('get_number', '📱')} <b>ANU PREMIUM OTP BOT</b>\n\n"
+        f"Welcome, <b>{user_name}</b>!\n\n"
         f"Need help or want to add a working number? Contact support: {SUPPORT_USERNAME}"
     )
     await update.message.reply_text(
-        welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard()
+        welcome_msg, parse_mode="HTML", reply_markup=get_main_keyboard()
     )
 
 
@@ -761,12 +848,28 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     # Auto-save subscriber ID whenever they send a message
     db_add_user(user_chat_id)
 
+    if context.user_data.get("waiting_for_emoji"):
+        emoji_key = context.user_data["waiting_for_emoji"]
+        emoji_id = text.strip()
+
+        db_set_emoji(emoji_key, emoji_id)
+        context.user_data["waiting_for_emoji"] = False
+
+        await update.message.reply_text(
+            f"✅ <b>Successfully updated Emoji ID for '{emoji_key}'!</b>\n\n"
+            f"New ID: <code>{emoji_id}</code>\n"
+            f"Preview: {get_emoji(emoji_key, '✨')}",
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard()
+        )
+        return
+
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠️ **Format Error!** Use: `Service | Country | Range`\n"
-                "Example: `Facebook | Cambodia | 85531879XXX`",
-                parse_mode="Markdown",
+                "⚠️ <b>Format Error!</b> Use: <code>Service | Country | Range</code>\n"
+                "Example: <code>Facebook | Cambodia | 85531879XXX</code>",
+                parse_mode="HTML",
             )
             return
 
@@ -780,11 +883,11 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_range"] = False
 
         await update.message.reply_text(
-            f"✅ **Successfully saved range to database!**\n"
-            f"📌 **Service:** `{service}`\n"
-            f"{detected_flag} **Country:** `{c_name}`\n"
-            f"🔢 **Range:** `{range_val}`",
-            parse_mode="Markdown",
+            f"✅ <b>Successfully saved range to database!</b>\n"
+            f"📌 <b>Service:</b> <code>{service}</code>\n"
+            f"{detected_flag} <b>Country:</b> <code>{c_name}</code>\n"
+            f"🔢 <b>Range:</b> <code>{range_val}</code>",
+            parse_mode="HTML",
             reply_markup=get_main_keyboard(),
         )
         return
@@ -793,7 +896,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_broadcast"] = False
         all_users = db_get_all_users()
         
-        # Include current active chat ID if user list is empty
         if not all_users:
             all_users = [user_chat_id]
 
@@ -804,15 +906,15 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             try:
                 await context.bot.send_message(
                     chat_id=uid,
-                    text=f"📢 **ANNOUNCEMENT** 📢\n\n{text}",
-                    parse_mode="Markdown"
+                    text=f"📢 <b>ANNOUNCEMENT</b> 📢\n\n{text}",
+                    parse_mode="HTML"
                 )
                 success += 1
             except Exception as e:
                 failed += 1
                 logging.error(f"Failed to broadcast to {uid}: {e}")
 
-        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
+        await status_msg.edit_text(f"✅ <b>Broadcast Completed!</b>\n\n Successful: <code>{success}</code>\n❌ Failed: <code>{failed}</code>", parse_mode="HTML")
         return
 
     if "Get Number" in text:
@@ -820,20 +922,21 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not managed_ranges:
             await update.message.reply_text(
-                "⚠ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                "⚠ No ranges configured yet. An admin must configure ranges via <code>/admin</code>.",
                 reply_markup=get_main_keyboard(),
+                parse_mode="HTML"
             )
             return
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
+            [InlineKeyboardButton(f"🛡️️ {srv} 🟢", callback_data=f"srv_{srv}")]
             for srv in services
         ]
 
         await update.message.reply_text(
-            "🛠 **Select a Service:**",
-            parse_mode="Markdown",
+            f"{get_emoji('get_number', '🛠')} <b>Select a Service:</b>",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
@@ -844,13 +947,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if meta.get("code") == 0:
             rows = res.get("data", {}).get("rows", [])
-            reply = "⚡ **Zebra Active Delivery Engines:**\n\n" + "\n".join(
-                [f"• 👤 **Sender:** `{r.get('sender')}` | **Ranges:** {', '.join([f'`{x}`' for x in r.get('ranges', [])])}" for r in rows[:10]]
+            reply = f"{get_emoji('active_engine', '⚡')} <b>Zebra Active Delivery Engines:</b>\n\n" + "\n".join(
+                [f"• 👤 <b>Sender:</b> <code>{r.get('sender')}</code> | <b>Ranges:</b> {', '.join([f'<code>{x}</code>' for x in r.get('ranges', [])])}" for r in rows[:10]]
             ) if rows else "🔍 No active engines found right now."
         else:
             reply = f"❌ Error checking active engines: {meta.get('error')}"
 
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        await update.message.reply_text(reply, parse_mode="HTML")
 
     elif "Live Feed" in text:
         await update.message.reply_text("⏳ Fetching live delivered SMS feeds...")
@@ -859,36 +962,36 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if meta.get("code") == 0:
             rows = res.get("data", {}).get("rows", [])
-            reply = "🌐 **Live Updates Feed (Recent 5):**\n\n" + "\n\n".join(
-                [f"• 📱 `{mask_phone_number(r.get('number'))}` | 👤 `{r.get('sender')}`\n  💬 `{r.get('message')}`" for r in rows[:5]]
+            reply = f"{get_emoji('live_feed', '🌐')} <b>Live Updates Feed (Recent 5):</b>\n\n" + "\n\n".join(
+                [f"• 📱 <code>{mask_phone_number(r.get('number'))}</code> | 👤 <code>{r.get('sender')}</code>\n  💬 <code>{r.get('message')}</code>" for r in rows[:5]]
             ) if rows else "📭 No live updates received recently."
         else:
             reply = f"❌ Error fetching feed: {meta.get('error')}"
 
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        await update.message.reply_text(reply, parse_mode="HTML")
 
     elif "Referrals" in text:
         bot_username = (await context.bot.get_me()).username
         await update.message.reply_text(
-            f"🎁 **Referral System**\n\n"
-            f"Share your referral link with friends:\n🔗 `https://t.me/{bot_username}?start={user_chat_id}`",
-            parse_mode="Markdown",
+            f"{get_emoji('referrals', '🎁')} <b>Referral System</b>\n\n"
+            f"Share your referral link with friends:\n🔗 <code>https://t.me/{bot_username}?start={user_chat_id}</code>",
+            parse_mode="HTML",
         )
 
     elif "My Profile" in text:
         user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
-        nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
+        nums_text = "\n".join([f"• <code>{num}</code>" for num in user_nums]) if user_nums else "None"
         await update.message.reply_text(
-            f"👤 **User Profile**\n\n"
-            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
-            f"📱 **Active Numbers:**\n{nums_text}",
-            parse_mode="Markdown",
+            f"{get_emoji('my_profile', '👤')} <b>User Profile</b>\n\n"
+            f"🆔 <b>Telegram ID:</b> <code>{user_chat_id}</code>\n"
+            f"📱 <b>Active Numbers:</b>\n{nums_text}",
+            parse_mode="HTML",
         )
 
     elif "Support Hub" in text:
         await update.message.reply_text(
-            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
-            parse_mode="Markdown",
+            f"{get_emoji('support_hub', '🎧')} <b>Support Hub</b>\n\nContact support agent directly {SUPPORT_USERNAME}",
+            parse_mode="HTML",
         )
 
 
@@ -913,7 +1016,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_|^emoji_"))
     app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
