@@ -27,7 +27,6 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # Updated Channel Configuration
 CHANNEL_CHAT_ID = int(os.getenv("CHANNEL_CHAT_ID", "-1003995981373"))
-METHOD_CHANNEL_CHAT_ID = int(os.getenv("METHOD_CHANNEL_CHAT_ID", "0"))
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/anupremiumotpchannel")
 METHOD_CHANNEL_URL = os.getenv("METHOD_CHANNEL_URL", "https://t.me/Anupremiummethode")
 
@@ -374,12 +373,11 @@ def extract_code(message_text: str) -> str:
 
 # --- Force Join Verification Helper ---
 async def is_user_subscribed(bot, user_id: int) -> bool:
-    """Checks if the user has joined the required Method channel."""
-    check_chat_id = METHOD_CHANNEL_CHAT_ID if METHOD_CHANNEL_CHAT_ID != 0 else CHANNEL_CHAT_ID
-    if check_chat_id == 0:
+    """Checks if the user has joined the required Telegram channel."""
+    if CHANNEL_CHAT_ID == 0:
         return True
     try:
-        member = await bot.get_chat_member(chat_id=check_chat_id, user_id=user_id)
+        member = await bot.get_chat_member(chat_id=CHANNEL_CHAT_ID, user_id=user_id)
         if member.status in ["creator", "administrator", "member"]:
             return True
         return False
@@ -389,15 +387,16 @@ async def is_user_subscribed(bot, user_id: int) -> bool:
 
 
 async def prompt_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a message asking the user to join the Method channel before using the bot."""
+    """Sends a message asking the user to join the channel before using the bot."""
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Join OTP Channel", url=CHANNEL_URL)],
         [InlineKeyboardButton("📚 Join Method Channel", url=METHOD_CHANNEL_URL)],
         [InlineKeyboardButton("✅ I Have Joined", callback_data="check_subscription")]
     ])
     
     msg_text = (
         "⚠️ **Access Restricted!**\n\n"
-        "To use this bot, you must join our official Telegram method channel first.\n\n"
+        "To use this bot, you must join our official Telegram channel first.\n\n"
         "Please join below and click **'I Have Joined'** to continue."
     )
     
@@ -712,7 +711,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     managed_ranges = db_get_managed_ranges()
 
     if data.startswith("srv_"):
-        selected_service = data[4:]
+        selected_service = data.replace("srv_", "")
         matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
 
         keyboard = [
@@ -736,7 +735,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         await query.answer()
         
         is_change_request = data.startswith("change_")
-        selected_range = data[7:] if is_change_request else data[5:]
+        selected_range = data.replace("prov_", "").replace("change_", "")
         matched_item = next((r for r in managed_ranges if r["range"] == selected_range), {})
         
         c_name, flag_icon = auto_detect_country_and_flag(
@@ -840,7 +839,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠️ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
