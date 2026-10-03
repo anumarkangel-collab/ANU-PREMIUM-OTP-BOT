@@ -669,7 +669,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
         await query.edit_message_text(
             f"🛠 **Selected Service:** `{selected_service}`\n\n"
-            f"👇 **Select Country / Range to allocate your numbers:**",
+            f"👇 **Select Country / Range to allocate your number:**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
@@ -693,42 +693,40 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             loading_msg = await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"⏳ Requesting new numbers for {flag_icon} range `{selected_range}`...",
+                text=f"⏳ Requesting new number for {flag_icon} range `{selected_range}`...",
                 parse_mode="Markdown",
             )
         else:
             await query.edit_message_text(
-                f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`..."
+                f"⏳ Requesting number for {flag_icon} range `{selected_range}`..."
             )
 
-        # Request multiple numbers (default: 2) from the API
-        allocated_numbers = await request_multiple_numbers(selected_range, count=2)
+        res = await zebra.get_number(selected_range)
+        meta = res.get("meta", {})
 
-        if allocated_numbers:
-            nums_text = "\n".join([f"• `{num}`" for num in allocated_numbers])
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated_num = row.get("number")
             
-            # Use the first number for country detection fallback
-            final_country_name, final_flag = auto_detect_country_and_flag(
-                matched_item.get("country", c_name), allocated_numbers[0]
-            )
+            api_country = row.get("country")
+            target_country = api_country if api_country else matched_item.get("country", c_name)
+            final_country_name, final_flag = auto_detect_country_and_flag(target_country, allocated_num)
 
-            # Store each allocated number in active_allocations
-            for num in allocated_numbers:
-                active_allocations[num] = {
-                    "chat_id": chat_id,
-                    "country": final_country_name,
-                    "flag": final_flag,
-                }
+            active_allocations[allocated_num] = {
+                "chat_id": chat_id,
+                "country": final_country_name,
+                "flag": final_flag,
+            }
 
             msg = (
-                f"✅ **Numbers Allocated Successfully!**\n\n"
-                f"📱 **Numbers:**\n{nums_text}\n\n"
+                f"✅ **Number Allocated Successfully!**\n\n"
+                f"📱 **Number:** `{allocated_num}`\n"
                 f"{final_flag} **Country:** {final_country_name}"
             )
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
                     [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
                 ]
             )
@@ -742,7 +740,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
         else:
-            msg = f"❌ **Failed to allocate numbers:**\nNo numbers returned for range `{selected_range}`."
+            err_msg = res.get("message") or meta.get("error") or "Unknown error"
+            msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
             if is_change_request:
                 await loading_msg.edit_text(msg, parse_mode="Markdown")
