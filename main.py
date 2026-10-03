@@ -24,13 +24,8 @@ from telegram.ext import (
 # --- Configuration via Environment Variables ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-# Updated Channel Configuration
-CHANNEL_CHAT_ID = int(os.getenv("CHANNEL_CHAT_ID", "-1003995981373"))
-METHOD_CHANNEL_CHAT_ID = int(os.getenv("METHOD_CHANNEL_CHAT_ID", "0"))
-CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/anupremiumotpchannel")
-METHOD_CHANNEL_URL = os.getenv("METHOD_CHANNEL_URL", "https://t.me/Anupremiummethode")
-
+CHANNEL_CHAT_ID = int(os.getenv("CHANNEL_CHAT_ID", "0"))
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/")
 ZEBRA_API_KEY = os.getenv("ZEBRA_API_KEY")
 ZEBRA_BASE_URL = os.getenv("ZEBRA_BASE_URL", "https://api.zebrasms.com/api/v1")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@anstans")
@@ -341,10 +336,12 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     text_clean = (country_text or "").strip().lower()
     digits_only = re.sub(r"\D", "", phone_or_range or "")
 
+    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
     for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
         if not key.isdigit() and key == text_clean:
             return c_name, flag
 
+    # 2. Second Priority: Match exact calling prefix at the START of digits_only
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -355,6 +352,7 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
         if digits_only.startswith(prefix):
             return COUNTRY_FLAG_MAP[prefix]
 
+    # 3. Fallback
     return country_text if country_text else "Unknown", "🌐"
 
 
@@ -370,41 +368,6 @@ def mask_phone_number(phone: str) -> str:
 def extract_code(message_text: str) -> str:
     match = re.search(r"\b\d{4,8}\b", message_text)
     return match.group(0) if match else "No code found"
-
-
-# --- Force Join Verification Helper ---
-async def is_user_subscribed(bot, user_id: int) -> bool:
-    """Checks if the user has joined the required Method channel."""
-    check_chat_id = METHOD_CHANNEL_CHAT_ID if METHOD_CHANNEL_CHAT_ID != 0 else CHANNEL_CHAT_ID
-    if check_chat_id == 0:
-        return True
-    try:
-        member = await bot.get_chat_member(chat_id=check_chat_id, user_id=user_id)
-        if member.status in ["creator", "administrator", "member"]:
-            return True
-        return False
-    except Exception as e:
-        logging.error(f"Force Join Check Error: {e}")
-        return True  # Fallback to allow usage if bot lacks permissions in the channel
-
-
-async def prompt_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a message asking the user to join the Method channel before using the bot."""
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📚 Join Method Channel", url=METHOD_CHANNEL_URL)],
-        [InlineKeyboardButton("✅ I Have Joined", callback_data="check_subscription")]
-    ])
-    
-    msg_text = (
-        "⚠️ **Access Restricted!**\n\n"
-        "To use this bot, you must join our official Telegram method channel first.\n\n"
-        "Please join below and click **'I Have Joined'** to continue."
-    )
-    
-    if update.message:
-        await update.message.reply_text(msg_text, parse_mode="Markdown", reply_markup=keyboard)
-    elif update.callback_query:
-        await update.callback_query.message.reply_text(msg_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 class ZebraSMSClient:
@@ -459,6 +422,7 @@ zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 
 async def request_multiple_numbers(range_val: str, count: int = 2):
+    """Utility function to request multiple numbers sequentially."""
     allocated = []
     for _ in range(count):
         res = await zebra.get_number(range_val)
@@ -466,6 +430,7 @@ async def request_multiple_numbers(range_val: str, count: int = 2):
         if meta.get("code") == 0:
             row = res["data"]["rows"][0]
             allocated.append(row.get("number"))
+        # Brief pause between requests to prevent API rate limits
         await asyncio.sleep(0.5)
     return allocated
 
@@ -686,29 +651,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
-    user_id = query.from_user.id
-
-    # Handle force-join check callback
-    if data == "check_subscription":
-        if await is_user_subscribed(context.bot, user_id):
-            await query.answer("✅ Thank you for subscribing!", show_alert=True)
-            await query.message.delete()
-            welcome_msg = (
-                f"👋 *ANU PREMIUM OTP BOT*\n\n"
-                f"Welcome! You now have full access.\n\n"
-                f"Need help or want to add a working number? Contact support: {SUPPORT_USERNAME}"
-            )
-            await context.bot.send_message(chat_id=chat_id, text=welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
-        else:
-            await query.answer("❌ You haven't joined the channel yet! Please join to proceed.", show_alert=True)
-        return
-
-    # Enforce force-join on other callbacks
-    if not await is_user_subscribed(context.bot, user_id):
-        await query.answer("⚠️ You must join our channel to use the bot!", show_alert=True)
-        await prompt_force_join(update, context)
-        return
-
     managed_ranges = db_get_managed_ranges()
 
     if data.startswith("srv_"):
@@ -727,7 +669,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
         await query.edit_message_text(
             f"🛠 **Selected Service:** `{selected_service}`\n\n"
-            f"👇 **Select Country / Range to allocate your numbers:**",
+            f"👇 **Select Country / Range to allocate your number:**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
@@ -751,39 +693,40 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             loading_msg = await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"⏳ Requesting new numbers for {flag_icon} range `{selected_range}`...",
+                text=f"⏳ Requesting new number for {flag_icon} range `{selected_range}`...",
                 parse_mode="Markdown",
             )
         else:
             await query.edit_message_text(
-                f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`..."
+                f"⏳ Requesting number for {flag_icon} range `{selected_range}`..."
             )
 
-        allocated_numbers = await request_multiple_numbers(selected_range, count=2)
+        res = await zebra.get_number(selected_range)
+        meta = res.get("meta", {})
 
-        if allocated_numbers:
-            nums_text = "\n".join([f"• `{num}`" for num in allocated_numbers])
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated_num = row.get("number")
             
-            final_country_name, final_flag = auto_detect_country_and_flag(
-                matched_item.get("country", c_name), allocated_numbers[0]
-            )
+            api_country = row.get("country")
+            target_country = api_country if api_country else matched_item.get("country", c_name)
+            final_country_name, final_flag = auto_detect_country_and_flag(target_country, allocated_num)
 
-            for num in allocated_numbers:
-                active_allocations[num] = {
-                    "chat_id": chat_id,
-                    "country": final_country_name,
-                    "flag": final_flag,
-                }
+            active_allocations[allocated_num] = {
+                "chat_id": chat_id,
+                "country": final_country_name,
+                "flag": final_flag,
+            }
 
             msg = (
-                f"✅ **Numbers Allocated Successfully!**\n\n"
-                f"📱 **Numbers:**\n{nums_text}\n\n"
+                f"✅ **Number Allocated Successfully!**\n\n"
+                f"📱 **Number:** `{allocated_num}`\n"
                 f"{final_flag} **Country:** {final_country_name}"
             )
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
                     [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
                 ]
             )
@@ -797,7 +740,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
         else:
-            msg = f"❌ **Failed to allocate numbers:**\nNo numbers returned for range `{selected_range}`."
+            err_msg = res.get("message") or meta.get("error") or "Unknown error"
+            msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
             if is_change_request:
                 await loading_msg.edit_text(msg, parse_mode="Markdown")
@@ -811,10 +755,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     db_add_user(user_id)
     
-    if not await is_user_subscribed(context.bot, user_id):
-        await prompt_force_join(update, context)
-        return
-
     welcome_msg = (
         f"👋 *ANU PREMIUM OTP BOT*\n\n"
         f"Welcome, *{user_name}*! 👋\n\n"
@@ -828,19 +768,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
 
     db_add_user(user_chat_id)
-
-    # Force Join Check for all regular user messages
-    if not await is_user_subscribed(context.bot, user_id):
-        await prompt_force_join(update, context)
-        return
 
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠️️ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠️ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
@@ -988,7 +922,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|check_subscription)"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
