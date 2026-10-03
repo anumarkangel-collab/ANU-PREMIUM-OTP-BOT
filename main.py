@@ -688,6 +688,12 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     user_id = query.from_user.id
 
+    # Handle click-to-copy feature for individual number buttons
+    if data.startswith("copy_"):
+        number_to_copy = data.replace("copy_", "")
+        await query.answer(f"✅ Copied: {number_to_copy}", show_alert=False)
+        return
+
     # Handle force-join check callback
     if data == "check_subscription":
         if await is_user_subscribed(context.bot, user_id):
@@ -762,8 +768,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         allocated_numbers = await request_multiple_numbers(selected_range, count=2)
 
         if allocated_numbers:
-            nums_text = "\n".join([f"• `{num}`" for num in allocated_numbers])
-            
             final_country_name, final_flag = auto_detect_country_and_flag(
                 matched_item.get("country", c_name), allocated_numbers[0]
             )
@@ -777,16 +781,19 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             msg = (
                 f"✅ **Numbers Allocated Successfully!**\n\n"
-                f"📱 **Numbers:**\n{nums_text}\n\n"
+                f"📱 **Click any number below to copy it[cite: 11]:**\n"
                 f"{final_flag} **Country:** {final_country_name}"
             )
 
-            keyboard = InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
-                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
-                ]
-            )
+            # Build inline buttons for each allocated number to make them copyable
+            keyboard_rows = []
+            for num in allocated_numbers:
+                keyboard_rows.append([InlineKeyboardButton(f"📋 {num}", callback_data=f"copy_{num}")])
+            
+            keyboard_rows.append([InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")])
+            keyboard_rows.append([InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)])
+
+            keyboard = InlineKeyboardMarkup(keyboard_rows)
 
             if is_change_request:
                 await loading_msg.edit_text(
@@ -840,7 +847,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠️️ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
@@ -988,7 +995,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|check_subscription)"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|copy_|check_subscription)"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
