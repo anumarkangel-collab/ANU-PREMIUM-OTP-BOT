@@ -510,9 +510,9 @@ async def auto_check_updates(app):
 
 def get_main_keyboard():
     keyboard = [
-        [KeyboardButton("📱 Get Number"), KeyboardButton("⚡ Active Engine")],
-        [KeyboardButton("🌐 Live Feed"), KeyboardButton("🎁 Referrals")],
-        [KeyboardButton("👤 My Profile"), KeyboardButton("🎧 Support Hub")],
+        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("⚡ Active Engine ⚡")],
+        [KeyboardButton("🌐 Live Feed 🔵"), KeyboardButton("🎁 Referrals 🟡")],
+        [KeyboardButton("👤 My Profile 🟣"), KeyboardButton("🎧 Support Hub 🔴")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -541,12 +541,12 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("➕ Add Range", callback_data="admin_add"),
-            InlineKeyboardButton("🗑 Delete Range", callback_data="admin_delete_select"),
+            InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add"),
+            InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select"),
         ],
         [
-            InlineKeyboardButton("📢 Broadcast Msg", callback_data="admin_broadcast"),
-            InlineKeyboardButton("⚠️ Clear All Ranges", callback_data="admin_clear"),
+            InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast"),
+            InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear"),
         ]
     ]
 
@@ -584,13 +584,13 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"❌ Delete {r['flag']} {r['service']} ({r['range']})",
+                    f"❌ Delete {r['flag']} {r['service']} ({r['range']}) 🔴",
                     callback_data=f"admin_del_{r['range']}"
                 )
             ]
             for r in managed_ranges
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="admin_back")])
+        keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back")])
 
         await query.edit_message_text(
             "🗑 **Select a specific range to delete:**",
@@ -631,7 +631,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"{r['flag']} {r['country']} ({r['range']})",
+                    f"{r['flag']} {r['country']} ({r['range']}) 🔵",
                     callback_data=f"prov_{r['range']}",
                 )
             ]
@@ -696,8 +696,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Number", callback_data=f"change_{selected_range}")],
-                    [InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)],
+                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
                 ]
             )
 
@@ -802,14 +802,14 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not managed_ranges:
             await update.message.reply_text(
-                "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                "⚠️️ No ranges configured yet. An admin must configure ranges via `/admin`.",
                 reply_markup=get_main_keyboard(),
             )
             return
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")]
+            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
             for srv in services
         ]
 
