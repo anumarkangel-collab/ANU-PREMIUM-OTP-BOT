@@ -385,10 +385,11 @@ async def is_user_subscribed(bot, user_id: int) -> bool:
         return False
     except Exception as e:
         logging.error(f"Force Join Check Error: {e}")
-        return True
+        return True  # Fallback to allow usage if bot lacks permissions in the channel
 
 
 async def prompt_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends a message asking the user to join the Method channel before using the bot."""
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📚 Join Method Channel", url=METHOD_CHANNEL_URL)],
         [InlineKeyboardButton("✅ I Have Joined", callback_data="check_subscription")]
@@ -413,6 +414,19 @@ class ZebraSMSClient:
             "MAuth": api_key,
             "Content-Type": "application/json",
         }
+
+    async def get_number(self, range_val: str) -> dict:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/publicapi/getnum",
+                    headers=self.headers,
+                    json={"range": range_val},
+                    timeout=10.0,
+                )
+                return response.json()
+            except Exception as e:
+                return {"meta": {"code": -500, "error": str(e)}}
 
     async def get_updates(self) -> dict:
         async with httpx.AsyncClient() as client:
@@ -446,31 +460,13 @@ zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 async def request_multiple_numbers(range_val: str, count: int = 2):
     allocated = []
-    async with httpx.AsyncClient(timeout=12.0) as client:
-        for _ in range(count):
-            try:
-                response = await client.post(
-                    f"{ZEBRA_BASE_URL}/publicapi/getnum",
-                    headers={
-                        "MAuth": ZEBRA_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={"range": range_val},
-                )
-                res = response.json()
-                
-                if isinstance(res, dict) and res.get("meta", {}).get("code") == 0:
-                    rows = res.get("data", {}).get("rows", [])
-                    if rows and isinstance(rows, list) and len(rows) > 0:
-                        num = rows[0].get("number")
-                        if num:
-                            allocated.append(num)
-                else:
-                    logging.error(f"Zebra API Error for range {range_val}: {res}")
-            except Exception as e:
-                logging.error(f"Exception during number request for {range_val}: {e}")
-
-            await asyncio.sleep(0.5)
+    for _ in range(count):
+        res = await zebra.get_number(range_val)
+        meta = res.get("meta", {})
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated.append(row.get("number"))
+        await asyncio.sleep(0.5)
     return allocated
 
 
@@ -692,6 +688,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     user_id = query.from_user.id
 
+    # Handle force-join check callback
     if data == "check_subscription":
         if await is_user_subscribed(context.bot, user_id):
             await query.answer("✅ Thank you for subscribing!", show_alert=True)
@@ -703,9 +700,10 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             )
             await context.bot.send_message(chat_id=chat_id, text=welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
         else:
-            await query.answer("❌ You haven't joined the channel yet!", show_alert=True)
+            await query.answer("❌ You haven't joined the channel yet! Please join to proceed.", show_alert=True)
         return
 
+    # Enforce force-join on other callbacks
     if not await is_user_subscribed(context.bot, user_id):
         await query.answer("⚠️ You must join our channel to use the bot!", show_alert=True)
         await prompt_force_join(update, context)
@@ -714,7 +712,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     managed_ranges = db_get_managed_ranges()
 
     if data.startswith("srv_"):
-        selected_service = data[4:]
+        selected_service = data.replace("srv_", "")
         matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
 
         keyboard = [
@@ -738,33 +736,28 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         await query.answer()
         
         is_change_request = data.startswith("change_")
-        selected_range = data[7:] if is_change_request else data[5:]
+        selected_range = data.replace("prov_", "").replace("change_", "")
         matched_item = next((r for r in managed_ranges if r["range"] == selected_range), {})
         
         c_name, flag_icon = auto_detect_country_and_flag(
             matched_item.get("country", ""), selected_range
         )
 
-        loading_msg = None
-        try:
-            if is_change_request:
-                try:
-                    await query.message.delete()
-                except Exception as e:
-                    logging.warning(f"Could not delete message: {e}")
+        if is_change_request:
+            try:
+                await query.message.delete()
+            except Exception as e:
+                logging.warning(f"Could not delete old message: {e}")
 
-                loading_msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`...",
-                    parse_mode="Markdown",
-                )
-            else:
-                await query.edit_message_text(
-                    f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`...",
-                    parse_mode="Markdown"
-                )
-        except Exception as err:
-            logging.error(f"Error editing loading message: {err}")
+            loading_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⏳ Requesting new numbers for {flag_icon} range `{selected_range}`...",
+                parse_mode="Markdown",
+            )
+        else:
+            await query.edit_message_text(
+                f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`..."
+            )
 
         allocated_numbers = await request_multiple_numbers(selected_range, count=2)
 
@@ -795,18 +788,18 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                 ]
             )
 
-            if is_change_request and loading_msg:
-                await loading_msg.edit_text(msg, parse_mode="Markdown", reply_markup=keyboard)
+            if is_change_request:
+                await loading_msg.edit_text(
+                    msg, parse_mode="Markdown", reply_markup=keyboard
+                )
             else:
-                await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=keyboard)
+                await query.edit_message_text(
+                    msg, parse_mode="Markdown", reply_markup=keyboard
+                )
         else:
-            msg = (
-                f"❌ **Failed to allocate numbers:**\n"
-                f"No stock or invalid response for range `{selected_range}`.\n\n"
-                f"Please try another range or check your Zebra SMS API key/balance."
-            )
+            msg = f"❌ **Failed to allocate numbers:**\nNo numbers returned for range `{selected_range}`."
             
-            if is_change_request and loading_msg:
+            if is_change_request:
                 await loading_msg.edit_text(msg, parse_mode="Markdown")
             else:
                 await query.edit_message_text(msg, parse_mode="Markdown")
@@ -839,6 +832,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     db_add_user(user_chat_id)
 
+    # Force Join Check for all regular user messages
     if not await is_user_subscribed(context.bot, user_id):
         await prompt_force_join(update, context)
         return
@@ -846,7 +840,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
-                "⚠ **Format Error!** Use: `Service | Country | Range`\n"
+                "⚠️️ **Format Error!** Use: `Service | Country | Range`\n"
                 "Example: `Facebook | Cambodia | 85531879XXX`",
                 parse_mode="Markdown",
             )
