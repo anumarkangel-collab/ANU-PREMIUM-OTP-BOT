@@ -740,6 +740,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
 
+    # Auto-save subscriber ID whenever they send a message
+    db_add_user(user_chat_id)
+
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
