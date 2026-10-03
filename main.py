@@ -688,12 +688,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     user_id = query.from_user.id
 
-    # Handle click-to-copy feature for individual number buttons
-    if data.startswith("copy_"):
-        number_to_copy = data.replace("copy_", "")
-        await query.answer(f"✅ Copied: {number_to_copy}", show_alert=False)
-        return
-
     # Handle force-join check callback
     if data == "check_subscription":
         if await is_user_subscribed(context.bot, user_id):
@@ -779,20 +773,20 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                     "flag": final_flag,
                 }
 
+            # Format numbers inside Telegram code-blocks (` `) so users can tap/click to copy natively
+            numbers_formatted = "\n".join([f"`{num}`" for num in allocated_numbers])
+
             msg = (
                 f"✅ **Numbers Allocated Successfully!**\n\n"
-                f"📱 **Click any number below to copy it[cite: 11]:**\n"
-                f"{final_flag} **Country:** {final_country_name}"
+                f"{final_flag} **Country:** {final_country_name}\n\n"
+                f"📱 **Tap any number below to copy:**\n"
+                f"{numbers_formatted}"
             )
 
-            # Build inline buttons for each allocated number to make them copyable
-            keyboard_rows = []
-            for num in allocated_numbers:
-                keyboard_rows.append([InlineKeyboardButton(f"📋 {num}", callback_data=f"copy_{num}")])
-            
-            keyboard_rows.append([InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")])
-            keyboard_rows.append([InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)])
-
+            keyboard_rows = [
+                [InlineKeyboardButton("🔄 Change Numbers 🟠", callback_data=f"change_{selected_range}")],
+                [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)]
+            ]
             keyboard = InlineKeyboardMarkup(keyboard_rows)
 
             if is_change_request:
@@ -800,7 +794,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
             else:
-                await query.edit_message_text(
+                await query.edit_text(
                     msg, parse_mode="Markdown", reply_markup=keyboard
                 )
         else:
@@ -995,7 +989,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|copy_|check_subscription)"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|check_subscription)"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
