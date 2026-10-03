@@ -415,19 +415,6 @@ class ZebraSMSClient:
             "Content-Type": "application/json",
         }
 
-    async def get_number(self, range_val: str) -> dict:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{self.base_url}/publicapi/getnum",
-                    headers=self.headers,
-                    json={"range": range_val},
-                    timeout=10.0,
-                )
-                return response.json()
-            except Exception as e:
-                return {"meta": {"code": -500, "error": str(e)}}
-
     async def get_updates(self) -> dict:
         async with httpx.AsyncClient() as client:
             try:
@@ -460,26 +447,31 @@ zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 async def request_multiple_numbers(range_val: str, count: int = 2):
     allocated = []
-    for _ in range(count):
-        try:
-            res = await zebra.get_number(range_val)
-            if not isinstance(res, dict):
-                continue
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        for _ in range(count):
+            try:
+                response = await client.post(
+                    f"{ZEBRA_BASE_URL}/publicapi/getnum",
+                    headers={
+                        "MAuth": ZEBRA_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={"range": range_val},
+                )
+                res = response.json()
+                
+                if isinstance(res, dict) and res.get("meta", {}).get("code") == 0:
+                    rows = res.get("data", {}).get("rows", [])
+                    if rows and isinstance(rows, list) and len(rows) > 0:
+                        num = rows[0].get("number")
+                        if num:
+                            allocated.append(num)
+                else:
+                    logging.error(f"Zebra API Error for range {range_val}: {res}")
+            except Exception as e:
+                logging.error(f"Exception during number request for {range_val}: {e}")
 
-            meta = res.get("meta", {})
-            if meta.get("code") == 0:
-                data = res.get("data", {})
-                rows = data.get("rows", []) if isinstance(data, dict) else []
-                if rows and isinstance(rows, list):
-                    num = rows[0].get("number")
-                    if num:
-                        allocated.append(num)
-            else:
-                logging.error(f"Zebra API returned error code {meta.get('code')}: {meta.get('error')}")
-        except Exception as e:
-            logging.error(f"Error fetching number for range {range_val}: {e}")
-
-        await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
     return allocated
 
 
@@ -701,7 +693,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     user_id = query.from_user.id
 
-    # Handle force-join check callback
     if data == "check_subscription":
         if await is_user_subscribed(context.bot, user_id):
             await query.answer("✅ Thank you for subscribing!", show_alert=True)
@@ -713,10 +704,9 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             )
             await context.bot.send_message(chat_id=chat_id, text=welcome_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
         else:
-            await query.answer("❌ You haven't joined the channel yet! Please join to proceed.", show_alert=True)
+            await query.answer("❌ You haven't joined the channel yet!", show_alert=True)
         return
 
-    # Enforce force-join on other callbacks
     if not await is_user_subscribed(context.bot, user_id):
         await query.answer("⚠️ You must join our channel to use the bot!", show_alert=True)
         await prompt_force_join(update, context)
@@ -756,21 +746,26 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             matched_item.get("country", ""), selected_range
         )
 
-        if is_change_request:
-            try:
-                await query.message.delete()
-            except Exception as e:
-                logging.warning(f"Could not delete old message: {e}")
+        loading_msg = None
+        try:
+            if is_change_request:
+                try:
+                    await query.message.delete()
+                except Exception as e:
+                    logging.warning(f"Could not delete message: {e}")
 
-            loading_msg = await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⏳ Requesting new numbers for {flag_icon} range `{selected_range}`...",
-                parse_mode="Markdown",
-            )
-        else:
-            await query.edit_message_text(
-                f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`..."
-            )
+                loading_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`...",
+                    parse_mode="Markdown",
+                )
+            else:
+                await query.edit_message_text(
+                    f"⏳ Requesting numbers for {flag_icon} range `{selected_range}`...",
+                    parse_mode="Markdown"
+                )
+        except Exception as err:
+            logging.error(f"Error editing loading message: {err}")
 
         allocated_numbers = await request_multiple_numbers(selected_range, count=2)
 
@@ -801,18 +796,18 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                 ]
             )
 
-            if is_change_request:
-                await loading_msg.edit_text(
-                    msg, parse_mode="Markdown", reply_markup=keyboard
-                )
+            if is_change_request and loading_msg:
+                await loading_msg.edit_text(msg, parse_mode="Markdown", reply_markup=keyboard)
             else:
-                await query.edit_message_text(
-                    msg, parse_mode="Markdown", reply_markup=keyboard
-                )
+                await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=keyboard)
         else:
-            msg = f"❌ **Failed to allocate numbers:**\nNo numbers returned for range `{selected_range}`."
+            msg = (
+                f"❌ **Failed to allocate numbers:**\n"
+                f"No stock or invalid response for range `{selected_range}`.\n\n"
+                f"Please try another range or check your Zebra SMS API key/balance."
+            )
             
-            if is_change_request:
+            if is_change_request and loading_msg:
                 await loading_msg.edit_text(msg, parse_mode="Markdown")
             else:
                 await query.edit_message_text(msg, parse_mode="Markdown")
