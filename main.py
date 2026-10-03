@@ -309,7 +309,7 @@ COUNTRY_FLAG_MAP = {
     "paraguay": ("Paraguay", "🇵🇾"), "595": ("Paraguay", "🇵🇾"),
     "peru": ("Peru", "🇵🇪"), "51": ("Peru", "🇵🇪"),
     "suriname": ("Suriname", "🇸🇷"), "597": ("Suriname", "🇸🇷"),
-    "trinidad": ("Trinidad and Tobago", "🇹TT"), "1868": ("Trinidad and Tobago", "🇹🇹"),
+    "trinidad": ("Trinidad and Tobago", "🇹🇹"), "1868": ("Trinidad and Tobago", "🇹🇹"),
     "usa": ("United States", "🇺🇸"), "united states": ("United States", "🇺🇸"), "us": ("United States", "🇺🇸"),
     "uruguay": ("Uruguay", "🇺🇾"), "598": ("Uruguay", "🇺🇾"),
     "venezuela": ("Venezuela", "🇻🇪"), "58": ("Venezuela", "🇻🇪"),
@@ -342,7 +342,6 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
             return c_name, flag
 
     # 2. Second Priority: Match exact calling prefix at the START of digits_only
-    # Sort numeric keys by length descending (longest prefix first)
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -422,6 +421,20 @@ class ZebraSMSClient:
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 
+async def request_multiple_numbers(range_val: str, count: int = 2):
+    """Utility function to request multiple numbers sequentially."""
+    allocated = []
+    for _ in range(count):
+        res = await zebra.get_number(range_val)
+        meta = res.get("meta", {})
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated.append(row.get("number"))
+        # Brief pause between requests to prevent API rate limits
+        await asyncio.sleep(0.5)
+    return allocated
+
+
 async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dummy_number = "+237628503546"
     dummy_sender = "FACEBOOK"
@@ -472,7 +485,6 @@ async def auto_check_updates(app):
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        # Deduplication ID constructed without timestamp to prevent duplicate sends on polling
                         msg_id = f"{target_number}_{msg_text}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
@@ -741,7 +753,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name or "User"
     
-    # Track user ID for broadcast messaging
     db_add_user(user_id)
     
     welcome_msg = (
@@ -758,7 +769,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
 
-    # Auto-save subscriber ID whenever they send a message
     db_add_user(user_chat_id)
 
     if context.user_data.get("waiting_for_range"):
@@ -774,7 +784,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
-        # Save directly to Supabase database
         db_add_managed_range(service, c_name, detected_flag, range_val)
         
         context.user_data["waiting_for_range"] = False
@@ -793,7 +802,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["waiting_for_broadcast"] = False
         all_users = db_get_all_users()
         
-        # Include current active chat ID if user list is empty
         if not all_users:
             all_users = [user_chat_id]
 
