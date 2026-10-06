@@ -664,6 +664,14 @@ async def name_generate_callback_handler(update: Update, context: ContextTypes.D
     data = query.data
     chat_id = query.message.chat_id
 
+    if data == "gen_menu":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
+            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
+        ])
+        await query.edit_message_text("🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:", parse_mode="Markdown", reply_markup=keyboard)
+        return
+
     if not MALE_NAMES and not FEMALE_NAMES:
         await query.edit_message_text("❌ Name database is empty or file not found.")
         return
@@ -720,6 +728,20 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     managed_ranges = db_get_managed_ranges()
 
+    if data == "srv_menu":
+        await query.answer()
+        services = sorted(list(set(r["service"] for r in managed_ranges)))
+        keyboard = [
+            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
+            for srv in services
+        ]
+        await query.edit_message_text(
+            "🛠 **Select a Service:**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
     if data.startswith("srv_"):
         selected_service = data.replace("srv_", "")
         matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
@@ -733,6 +755,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             ]
             for r in matching_ranges
         ]
+        # Add Back button to return to service menu
+        keyboard.append([InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")])
 
         await query.edit_message_text(
             f"🛠 **Selected Service:** `{selected_service}`\n\n"
@@ -795,6 +819,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                 [
                     [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
                     [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
+                    [InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]
                 ]
             )
 
@@ -810,10 +835,12 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             err_msg = res.get("message") or meta.get("error") or "Unknown error"
             msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
+            back_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]])
+
             if is_change_request:
-                await loading_msg.edit_text(msg, parse_mode="Markdown")
+                await loading_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
             else:
-                await query.edit_message_text(msg, parse_mode="Markdown")
+                await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1001,7 +1028,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(name_generate_callback_handler, pattern="^gen_(male|female|pair)$"))
+    app.add_handler(CallbackQueryHandler(name_generate_callback_handler, pattern="^gen_(male|female|pair|menu)$"))
     app.add_handler(CallbackQueryHandler(name_menu_callback_handler, pattern="^gen_menu$"))
     app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
 
