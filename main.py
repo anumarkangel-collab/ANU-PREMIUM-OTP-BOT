@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import os
+import random
 import re
 import httpx
+import pandas as pd
 from keep_alive import keep_alive
 from supabase import create_client, Client
 from telegram import (
@@ -51,6 +53,25 @@ DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
+
+# --- Load Names from Excel ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+EXCEL_PATH = os.path.join(BASE_DIR, "Male&Female Names.xlsx")
+
+MALE_NAMES = []
+FEMALE_NAMES = []
+
+try:
+    if os.path.exists(EXCEL_PATH):
+        male_df = pd.read_excel(EXCEL_PATH, sheet_name="Male Names")
+        female_df = pd.read_excel(EXCEL_PATH, sheet_name="Female Names")
+        MALE_NAMES = male_df["Name"].dropna().tolist()
+        FEMALE_NAMES = female_df["Name"].dropna().tolist()
+        logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully.")
+    else:
+        logging.warning(f"Excel file not found at: {EXCEL_PATH}")
+except Exception as e:
+    logging.error(f"Failed to load names from Excel: {e}")
 
 
 # --- Database Helper Functions ---
@@ -336,12 +357,10 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     text_clean = (country_text or "").strip().lower()
     digits_only = re.sub(r"\D", "", phone_or_range or "")
 
-    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
     for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
         if not key.isdigit() and key == text_clean:
             return c_name, flag
 
-    # 2. Second Priority: Match exact calling prefix at the START of digits_only
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -352,7 +371,6 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
         if digits_only.startswith(prefix):
             return COUNTRY_FLAG_MAP[prefix]
 
-    # 3. Fallback
     return country_text if country_text else "Unknown", "🌐"
 
 
@@ -419,20 +437,6 @@ class ZebraSMSClient:
 
 
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
-
-
-async def request_multiple_numbers(range_val: str, count: int = 2):
-    """Utility function to request multiple numbers sequentially."""
-    allocated = []
-    for _ in range(count):
-        res = await zebra.get_number(range_val)
-        meta = res.get("meta", {})
-        if meta.get("code") == 0:
-            row = res["data"]["rows"][0]
-            allocated.append(row.get("number"))
-        # Brief pause between requests to prevent API rate limits
-        await asyncio.sleep(0.5)
-    return allocated
 
 
 async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -539,9 +543,10 @@ async def auto_check_updates(app):
 
 def get_main_keyboard():
     keyboard = [
-        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("⚡ Active Engine ⚡")],
-        [KeyboardButton("🌐 Live Feed 🔵"), KeyboardButton("🎁 Referrals 🟡")],
-        [KeyboardButton("👤 My Profile 🟣"), KeyboardButton("🎧 Support Hub 🔴")],
+        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("🏷️ Name Generate 🔤")],
+        [KeyboardButton("⚡ Active Engine ⚡"), KeyboardButton("🌐 Live Feed 🔵")],
+        [KeyboardButton("🎁 Referrals 🟡"), KeyboardButton("👤 My Profile 🟣")],
+        [KeyboardButton("🎧 Support Hub 🔴")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -645,6 +650,49 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         db_clear_managed_ranges()
         await query.answer("All ranges cleared from database!", show_alert=True)
         await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
+
+
+async def name_generate_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if not MALE_NAMES and not FEMALE_NAMES:
+        await query.edit_message_text("❌ Name database is empty or file not found.")
+        return
+
+    if data == "gen_male":
+        name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
+        text = f"👨 **Generated Male Name:**\n\n`{name}`"
+    elif data == "gen_female":
+        name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
+        text = f"👩 **Generated Female Name:**\n\n`{name}`"
+    elif data == "gen_pair":
+        m_name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
+        f_name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
+        text = f"🏷️ **Generated Names:**\n\n👨 Male / Father Name: `{m_name}`\n👩 Female Name: `{f_name}`"
+    else:
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 Generate Another 🔤", callback_data=data),
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Options 🔙", callback_data="gen_menu")
+        ]
+    ])
+
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+
+async def name_menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
+        [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
+    ])
+    await query.edit_message_text("🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:", parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -845,6 +893,17 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
+    elif "Name Generate" in text:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
+            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
+        ])
+        await update.message.reply_text(
+            "🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+
     elif "Active Engine" in text:
         await update.message.reply_text("⏳ Fetching active delivery engines...")
         res = await zebra.get_live_access()
@@ -886,45 +945,3 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     elif "My Profile" in text:
         user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
         nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
-        await update.message.reply_text(
-            f"👤 **User Profile**\n\n"
-            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
-            f"📱 **Active Numbers:**\n{nums_text}",
-            parse_mode="Markdown",
-        )
-
-    elif "Support Hub" in text:
-        await update.message.reply_text(
-            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
-            parse_mode="Markdown",
-        )
-
-
-async def post_init(application):
-    application.create_task(auto_check_updates(application))
-
-
-# --- Main Execution ---
-
-if __name__ == "__main__":
-    keep_alive()
-    print("Keep-alive HTTP server started.")
-
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("admin", cmd_admin))
-    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
-
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
-
-    print("🤖 Bot running...")
-    app.run_polling()
