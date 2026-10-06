@@ -662,6 +662,7 @@ async def name_generate_callback_handler(update: Update, context: ContextTypes.D
     query = update.callback_query
     await query.answer()
     data = query.data
+    chat_id = query.message.chat_id
 
     if not MALE_NAMES and not FEMALE_NAMES:
         await query.edit_message_text("❌ Name database is empty or file not found.")
@@ -689,7 +690,19 @@ async def name_generate_callback_handler(update: Update, context: ContextTypes.D
         ]
     ])
 
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    # Delete the old message so it doesn't linger above
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logging.warning(f"Could not delete previous name message: {e}")
+
+    # Send the new name as a brand new inbox message at the bottom
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
 
 async def name_menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
