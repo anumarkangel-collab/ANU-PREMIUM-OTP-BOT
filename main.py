@@ -5,6 +5,7 @@ import random
 import re
 import httpx
 import pandas as pd
+from threading import Thread
 from keep_alive import keep_alive
 from supabase import create_client, Client
 from telegram import (
@@ -54,24 +55,29 @@ DEFAULT_RANGES = [
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
 
-# --- Load Names from Excel ---
+# --- Load Names from Excel (Non-blocking background initialization) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_PATH = os.path.join(BASE_DIR, "Male&Female Names.xlsx")
 
 MALE_NAMES = []
 FEMALE_NAMES = []
 
-try:
-    if os.path.exists(EXCEL_PATH):
-        male_df = pd.read_excel(EXCEL_PATH, sheet_name="Male Names")
-        female_df = pd.read_excel(EXCEL_PATH, sheet_name="Female Names")
-        MALE_NAMES = male_df["Name"].dropna().tolist()
-        FEMALE_NAMES = female_df["Name"].dropna().tolist()
-        logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully.")
-    else:
-        logging.warning(f"Excel file not found at: {EXCEL_PATH}")
-except Exception as e:
-    logging.error(f"Failed to load names from Excel: {e}")
+def load_names_background():
+    global MALE_NAMES, FEMALE_NAMES
+    try:
+        if os.path.exists(EXCEL_PATH):
+            male_df = pd.read_excel(EXCEL_PATH, sheet_name="Male Names")
+            female_df = pd.read_excel(EXCEL_PATH, sheet_name="Female Names")
+            MALE_NAMES = male_df["Name"].dropna().tolist()
+            FEMALE_NAMES = female_df["Name"].dropna().tolist()
+            logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully.")
+        else:
+            logging.warning(f"Excel file not found at: {EXCEL_PATH}")
+    except Exception as e:
+        logging.error(f"Failed to load names from Excel: {e}")
+
+# Start background thread immediately so port binding isn't delayed
+Thread(target=load_names_background, daemon=True).start()
 
 
 # --- Database Helper Functions ---
@@ -945,3 +951,48 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     elif "My Profile" in text:
         user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
         nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
+        await update.message.reply_text(
+            f"👤 **User Profile**\n\n"
+            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
+            f"📱 **Active Numbers:**\n{nums_text}",
+            parse_mode="Markdown",
+        )
+
+    elif "Support Hub" in text:
+        await update.message.reply_text(
+            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
+            parse_mode="Markdown",
+        )
+
+
+async def post_init(application):
+    application.create_task(auto_check_updates(application))
+
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
+    # Start Keep-Alive web server instantly so Render detects the open port immediately
+    keep_alive()
+    print("Keep-alive HTTP server started.")
+
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
+
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+    app.add_handler(CallbackQueryHandler(name_generate_callback_handler, pattern="^gen_(male|female|pair)$"))
+    app.add_handler(CallbackQueryHandler(name_menu_callback_handler, pattern="^gen_menu$"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+
+    print("🤖 Bot running...")
+    app.run_polling()
