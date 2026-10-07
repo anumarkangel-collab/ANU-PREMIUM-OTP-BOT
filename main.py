@@ -1,11 +1,8 @@
 import asyncio
 import logging
 import os
-import random
 import re
 import httpx
-import pandas as pd
-from threading import Thread
 from keep_alive import keep_alive
 from supabase import create_client, Client
 from telegram import (
@@ -54,41 +51,6 @@ DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
 ]
-
-# --- Load Names from Excel (Non-blocking background initialization) ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_PATH = os.path.join(BASE_DIR, "name.xlsx")
-
-MALE_NAMES = []
-FEMALE_NAMES = []
-
-def load_names_background():
-    global MALE_NAMES, FEMALE_NAMES
-    try:
-        if os.path.exists(EXCEL_PATH):
-            df = pd.read_excel(EXCEL_PATH)
-            # Ensure proper string stripping and column name cleaning
-            df.columns = [c.strip() for c in df.columns]
-            
-            if "First Name" in df.columns and "Last Name" in df.columns and "Gender" in df.columns:
-                df["Gender"] = df["Gender"].astype(str).str.strip().str.lower()
-                df["Full_Name"] = df["First Name"].astype(str).str.strip() + " " + df["Last Name"].astype(str).str.strip()
-                
-                male_df = df[df["Gender"] == "male"]
-                female_df = df[df["Gender"] == "female"]
-                
-                MALE_NAMES = male_df["Full_Name"].dropna().tolist()
-                FEMALE_NAMES = female_df["Full_Name"].dropna().tolist()
-                logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully from name.xlsx.")
-            else:
-                logging.error("Excel columns 'First Name', 'Last Name', or 'Gender' not found in name.xlsx")
-        else:
-            logging.warning(f"Excel file not found at: {EXCEL_PATH}")
-    except Exception as e:
-        logging.error(f"Failed to load names from Excel: {e}")
-
-# Start background thread immediately so port binding isn't delayed
-Thread(target=load_names_background, daemon=True).start()
 
 
 # --- Database Helper Functions ---
@@ -374,10 +336,12 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     text_clean = (country_text or "").strip().lower()
     digits_only = re.sub(r"\D", "", phone_or_range or "")
 
+    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
     for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
         if not key.isdigit() and key == text_clean:
             return c_name, flag
 
+    # 2. Second Priority: Match exact calling prefix at the START of digits_only
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -388,6 +352,7 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
         if digits_only.startswith(prefix):
             return COUNTRY_FLAG_MAP[prefix]
 
+    # 3. Fallback
     return country_text if country_text else "Unknown", "🌐"
 
 
@@ -454,6 +419,20 @@ class ZebraSMSClient:
 
 
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
+
+
+async def request_multiple_numbers(range_val: str, count: int = 2):
+    """Utility function to request multiple numbers sequentially."""
+    allocated = []
+    for _ in range(count):
+        res = await zebra.get_number(range_val)
+        meta = res.get("meta", {})
+        if meta.get("code") == 0:
+            row = res["data"]["rows"][0]
+            allocated.append(row.get("number"))
+        # Brief pause between requests to prevent API rate limits
+        await asyncio.sleep(0.5)
+    return allocated
 
 
 async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -560,10 +539,9 @@ async def auto_check_updates(app):
 
 def get_main_keyboard():
     keyboard = [
-        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("🏷️ Name Generate 🔤")],
-        [KeyboardButton("⚡ Active Engine ⚡"), KeyboardButton("🌐 Live Feed 🔵")],
-        [KeyboardButton("🎁 Referrals 🟡"), KeyboardButton("👤 My Profile 🟣")],
-        [KeyboardButton("🎧 Support Hub 🔴")],
+        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("⚡ Active Engine ⚡")],
+        [KeyboardButton("🌐 Live Feed 🔵"), KeyboardButton("🎁 Referrals 🟡")],
+        [KeyboardButton("👤 My Profile 🟣"), KeyboardButton("🎧 Support Hub 🔴")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -669,78 +647,11 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
 
 
-async def name_generate_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    chat_id = query.message.chat_id
-
-    if data == "gen_menu":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-        ])
-        await query.edit_message_text("🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:", parse_mode="Markdown", reply_markup=keyboard)
-        return
-
-    if not MALE_NAMES and not FEMALE_NAMES:
-        await query.edit_message_text("❌ Name database is empty or file not found.")
-        return
-
-    if data == "gen_male":
-        name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
-        text = f"👨 **Generated Male Name:**\n\n`{name}`"
-    elif data == "gen_female":
-        name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
-        text = f"👩 **Generated Female Name:**\n\n`{name}`"
-    elif data == "gen_pair":
-        m_name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
-        f_name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
-        text = f"🏷️ **Generated Names:**\n\n👨 Male / Father Name: `{m_name}`\n👩 Female Name: `{f_name}`"
-    else:
-        return
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔄 Generate Another 🔤", callback_data=data),
-        ],
-        [
-            InlineKeyboardButton("🔙 Back to Options 🔙", callback_data="gen_menu")
-        ]
-    ])
-
-    try:
-        await query.message.delete()
-    except Exception as e:
-        logging.warning(f"Could not delete previous name message: {e}")
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-
-
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
     managed_ranges = db_get_managed_ranges()
-
-    if data == "srv_menu":
-        await query.answer()
-        services = sorted(list(set(r["service"] for r in managed_ranges)))
-        keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
-            for srv in services
-        ]
-        await query.edit_message_text(
-            "🛠 **Select a Service:**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-        return
 
     if data.startswith("srv_"):
         selected_service = data.replace("srv_", "")
@@ -755,7 +666,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             ]
             for r in matching_ranges
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")])
 
         await query.edit_message_text(
             f"🛠 **Selected Service:** `{selected_service}`\n\n"
@@ -818,7 +728,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                 [
                     [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
                     [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
-                    [InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]
                 ]
             )
 
@@ -834,12 +743,10 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             err_msg = res.get("message") or meta.get("error") or "Unknown error"
             msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
-            back_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]])
-
             if is_change_request:
-                await loading_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
+                await loading_msg.edit_text(msg, parse_mode="Markdown")
             else:
-                await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
+                await query.edit_message_text(msg, parse_mode="Markdown")
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -921,7 +828,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not managed_ranges:
             await update.message.reply_text(
-                "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                "⚠ No ranges configured yet. An admin must configure ranges via `/admin`.",
                 reply_markup=get_main_keyboard(),
             )
             return
@@ -931,16 +838,93 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
             for srv in services
         ]
+
         await update.message.reply_text(
             "🛠 **Select a Service:**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
-        return
 
-    if "Name Generate" in text:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-        ])
+    elif "Active Engine" in text:
+        await update.message.reply_text("⏳ Fetching active delivery engines...")
+        res = await zebra.get_live_access()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "⚡ **Zebra Active Delivery Engines:**\n\n" + "\n".join(
+                [f"• 👤 **Sender:** `{r.get('sender')}` | **Ranges:** {', '.join([f'`{x}`' for x in r.get('ranges', [])])}" for r in rows[:10]]
+            ) if rows else "🔍 No active engines found right now."
+        else:
+            reply = f"❌ Error checking active engines: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Live Feed" in text:
+        await update.message.reply_text("⏳ Fetching live delivered SMS feeds...")
+        res = await zebra.get_updates()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "🌐 **Live Updates Feed (Recent 5):**\n\n" + "\n\n".join(
+                [f"• 📱 `{mask_phone_number(r.get('number'))}` | 👤 `{r.get('sender')}`\n  💬 `{r.get('message')}`" for r in rows[:5]]
+            ) if rows else "📭 No live updates received recently."
+        else:
+            reply = f"❌ Error fetching feed: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Referrals" in text:
+        bot_username = (await context.bot.get_me()).username
         await update.message.reply_text(
+            f"🎁 **Referral System**\n\n"
+            f"Share your referral link with friends:\n🔗 `https://t.me/{bot_username}?start={user_chat_id}`",
+            parse_mode="Markdown",
+        )
+
+    elif "My Profile" in text:
+        user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
+        nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
+        await update.message.reply_text(
+            f"👤 **User Profile**\n\n"
+            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
+            f"📱 **Active Numbers:**\n{nums_text}",
+            parse_mode="Markdown",
+        )
+
+    elif "Support Hub" in text:
+        await update.message.reply_text(
+            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
+            parse_mode="Markdown",
+        )
+
+
+async def post_init(application):
+    application.create_task(auto_check_updates(application))
+
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
+    keep_alive()
+    print("Keep-alive HTTP server started.")
+
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
+
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+
+    print("🤖 Bot running...")
+    app.run_polling()
