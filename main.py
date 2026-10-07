@@ -709,13 +709,11 @@ async def name_generate_callback_handler(update: Update, context: ContextTypes.D
         ]
     ])
 
-    # Delete the old message so it doesn't linger above
     try:
         await query.message.delete()
     except Exception as e:
         logging.warning(f"Could not delete previous name message: {e}")
 
-    # Send the new name as a brand new inbox message at the bottom
     await context.bot.send_message(
         chat_id=chat_id,
         text=text,
@@ -766,7 +764,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             ]
             for r in matching_ranges
         ]
-        # Add Back button to return to service menu
         keyboard.append([InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")])
 
         await query.edit_message_text(
@@ -933,7 +930,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not managed_ranges:
             await update.message.reply_text(
-                "⚠ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
                 reply_markup=get_main_keyboard(),
             )
             return
@@ -942,3 +939,99 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [
             [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
             for srv in services
+        ]
+        await update.message.reply_text(
+            "🛠 **Select a Service:**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if "Name Generate" in text:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
+            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
+        ])
+        await update.message.reply_text(
+            "🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+        return
+
+    if "Active Engine" in text:
+        count = len(active_allocations)
+        await update.message.reply_text(
+            f"⚡ **Active Engine Status**\n\n"
+            f"• Currently Active Allocations: `{count}`\n"
+            f"• Background Polling: `Running (24/7)`",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+    if "Live Feed" in text:
+        res = await zebra.get_live_access()
+        meta = res.get("meta", {})
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])[:5]
+            if not rows:
+                feed_text = "🌐 No recent messages found in live feed."
+            else:
+                feed_text = "🌐 **Recent Live SMS Feed:**\n\n"
+                for r in rows:
+                    num = mask_phone_number(r.get("number", ""))
+                    sender = r.get("sender", "Unknown")
+                    msg = r.get("message", "")
+                    feed_text += f"📱 `{num}` | 👤 `{sender}`\n💬 `{msg}`\n\n"
+        else:
+            feed_text = "❌ Failed to fetch live feed from ZebraSMS API."
+
+        await update.message.reply_text(feed_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        return
+
+    if "Referrals" in text:
+        bot_user = (await context.bot.get_me()).username
+        ref_link = f"https://t.me/{bot_user}?start=ref_{user_chat_id}"
+        await update.message.reply_text(
+            f"🎁 **Referral Program**\n\n"
+            f"Invite your friends and earn rewards!\n\n"
+            f"🔗 Your Invite Link:\n`{ref_link}`",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+    if "My Profile" in text:
+        await update.message.reply_text(
+            f"👤 **User Profile**\n\n"
+            f"• Telegram ID: `{user_chat_id}`\n"
+            f"• Status: `Active / Verified`",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+    if "Support Hub" in text:
+        await update.message.reply_text(
+            f"🎧 **Support Hub**\n\n"
+            f"Need assistance or have issues? Contact our support team directly: {SUPPORT_USERNAME}",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+
+def main():
+    if not TELEGRAM_BOT_TOKEN:
+        logging.error("TELEGRAM_BOT_TOKEN environment variable is not set!")
+        return
+
+    # Start keep_alive server for uptime hosting (Render/Replit)
+    keep_alive()
+
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Command Handlers
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("admin", cmd_admin))
