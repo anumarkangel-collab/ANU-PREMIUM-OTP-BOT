@@ -57,7 +57,7 @@ DEFAULT_RANGES = [
 
 # --- Load Names from Excel (Non-blocking background initialization) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_PATH = os.path.join(BASE_DIR, "Male&Female Names.xlsx")
+EXCEL_PATH = os.path.join(BASE_DIR, "name.xlsx")
 
 MALE_NAMES = []
 FEMALE_NAMES = []
@@ -66,11 +66,22 @@ def load_names_background():
     global MALE_NAMES, FEMALE_NAMES
     try:
         if os.path.exists(EXCEL_PATH):
-            male_df = pd.read_excel(EXCEL_PATH, sheet_name="Male Names")
-            female_df = pd.read_excel(EXCEL_PATH, sheet_name="Female Names")
-            MALE_NAMES = male_df["Name"].dropna().tolist()
-            FEMALE_NAMES = female_df["Name"].dropna().tolist()
-            logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully.")
+            df = pd.read_excel(EXCEL_PATH)
+            # Ensure proper string stripping and column name cleaning
+            df.columns = [c.strip() for c in df.columns]
+            
+            if "First Name" in df.columns and "Last Name" in df.columns and "Gender" in df.columns:
+                df["Gender"] = df["Gender"].astype(str).str.strip().str.lower()
+                df["Full_Name"] = df["First Name"].astype(str).str.strip() + " " + df["Last Name"].astype(str).str.strip()
+                
+                male_df = df[df["Gender"] == "male"]
+                female_df = df[df["Gender"] == "female"]
+                
+                MALE_NAMES = male_df["Full_Name"].dropna().tolist()
+                FEMALE_NAMES = female_df["Full_Name"].dropna().tolist()
+                logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully from name.xlsx.")
+            else:
+                logging.error("Excel columns 'First Name', 'Last Name', or 'Gender' not found in name.xlsx")
         else:
             logging.warning(f"Excel file not found at: {EXCEL_PATH}")
     except Exception as e:
@@ -931,108 +942,3 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = [
             [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
             for srv in services
-        ]
-
-        await update.message.reply_text(
-            "🛠 **Select a Service:**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
-    elif "Name Generate" in text:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-        ])
-        await update.message.reply_text(
-            "🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:",
-            parse_mode="Markdown",
-            reply_markup=keyboard,
-        )
-
-    elif "Active Engine" in text:
-        await update.message.reply_text("⏳ Fetching active delivery engines...")
-        res = await zebra.get_live_access()
-        meta = res.get("meta", {})
-
-        if meta.get("code") == 0:
-            rows = res.get("data", {}).get("rows", [])
-            reply = "⚡ **Zebra Active Delivery Engines:**\n\n" + "\n".join(
-                [f"• 👤 **Sender:** `{r.get('sender')}` | **Ranges:** {', '.join([f'`{x}`' for x in r.get('ranges', [])])}" for r in rows[:10]]
-            ) if rows else "🔍 No active engines found right now."
-        else:
-            reply = f"❌ Error checking active engines: {meta.get('error')}"
-
-        await update.message.reply_text(reply, parse_mode="Markdown")
-
-    elif "Live Feed" in text:
-        await update.message.reply_text("⏳ Fetching live delivered SMS feeds...")
-        res = await zebra.get_updates()
-        meta = res.get("meta", {})
-
-        if meta.get("code") == 0:
-            rows = res.get("data", {}).get("rows", [])
-            reply = "🌐 **Live Updates Feed (Recent 5):**\n\n" + "\n\n".join(
-                [f"• 📱 `{mask_phone_number(r.get('number'))}` | 👤 `{r.get('sender')}`\n  💬 `{r.get('message')}`" for r in rows[:5]]
-            ) if rows else "📭 No live updates received recently."
-        else:
-            reply = f"❌ Error fetching feed: {meta.get('error')}"
-
-        await update.message.reply_text(reply, parse_mode="Markdown")
-
-    elif "Referrals" in text:
-        bot_username = (await context.bot.get_me()).username
-        await update.message.reply_text(
-            f"🎁 **Referral System**\n\n"
-            f"Share your referral link with friends:\n🔗 `https://t.me/{bot_username}?start={user_chat_id}`",
-            parse_mode="Markdown",
-        )
-
-    elif "My Profile" in text:
-        user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
-        nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
-        await update.message.reply_text(
-            f"👤 **User Profile**\n\n"
-            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
-            f"📱 **Active Numbers:**\n{nums_text}",
-            parse_mode="Markdown",
-        )
-
-    elif "Support Hub" in text:
-        await update.message.reply_text(
-            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
-            parse_mode="Markdown",
-        )
-
-
-async def post_init(application):
-    application.create_task(auto_check_updates(application))
-
-
-# --- Main Execution ---
-
-if __name__ == "__main__":
-    # Start Keep-Alive web server instantly so Render detects the open port immediately
-    keep_alive()
-    print("Keep-alive HTTP server started.")
-
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("admin", cmd_admin))
-    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
-
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(name_generate_callback_handler, pattern="^gen_(male|female|pair|menu)$"))
-    app.add_handler(CallbackQueryHandler(name_menu_callback_handler, pattern="^gen_menu$"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
-
-    print("🤖 Bot running...")
-    app.run_polling()
