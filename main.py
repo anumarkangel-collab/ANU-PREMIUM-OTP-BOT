@@ -570,7 +570,15 @@ async def name_generator_callback_handler(update: Update, context: ContextTypes.
             [[InlineKeyboardButton("🔄 Generate Another", callback_data="gen_new_names")]]
         )
 
-        await query.edit_message_text(
+        # Delete the previous name message
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logging.warning(f"Could not delete old name message: {e}")
+
+        # Send the new name as a fresh message at the bottom
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
             text=f"🔤 **Generated English Names:**\n\n"
                  f"First Name: `{first_name}`\n"
                  f"Father's Name: `{father_name}`\n\n"
