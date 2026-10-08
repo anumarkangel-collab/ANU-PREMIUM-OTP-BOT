@@ -564,7 +564,6 @@ async def name_generator_callback_handler(update: Update, context: ContextTypes.
     if query.data == "gen_new_names":
         first_name = random.choice(ENGLISH_FIRST_NAMES)
         father_name = random.choice(ENGLISH_FATHER_NAMES)
-        copyable_block = f"{first_name} {father_name}"
 
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔄 Generate Another", callback_data="gen_new_names")]]
@@ -581,9 +580,7 @@ async def name_generator_callback_handler(update: Update, context: ContextTypes.
             chat_id=query.message.chat_id,
             text=f"🔤 **Generated English Names:**\n\n"
                  f"First Name: `{first_name}`\n"
-                 f"Father's Name: `{father_name}`\n\n"
-                 f"Full Name:\n`{copyable_block}`\n\n"
-                 f"*(Tap code blocks above to copy)*",
+                 f"Father's Name: `{father_name}`",
             parse_mode="Markdown",
             reply_markup=keyboard,
         )
@@ -814,7 +811,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     elif "Generate Names" in text:
         first_name = random.choice(ENGLISH_FIRST_NAMES)
         father_name = random.choice(ENGLISH_FATHER_NAMES)
-        copyable_block = f"{first_name} {father_name}"
 
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔄 Generate Another", callback_data="gen_new_names")]]
@@ -823,9 +819,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(
             f"🔤 **Generated English Names:**\n\n"
             f"First Name: `{first_name}`\n"
-            f"Father's Name: `{father_name}`\n\n"
-            f"Full Name:\n`{copyable_block}`\n\n"
-            f"*(Tap code blocks above to copy)*",
+            f"Father's Name: `{father_name}`",
             parse_mode="Markdown",
             reply_markup=keyboard,
         )
