@@ -35,7 +35,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Initialize Supabase Client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None[cite: 1]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -51,7 +51,7 @@ MAX_SEEN_SIZE = 5000
 DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
-][cite: 1]
+]
 
 
 # --- English Name Generator Datasets ---
@@ -80,7 +80,7 @@ def db_get_managed_ranges() -> list:
         return DEFAULT_RANGES
     except Exception as e:
         logging.error(f"Error fetching ranges from Supabase: {e}")
-        return DEFAULT_RANGES[cite: 1]
+        return DEFAULT_RANGES
 
 
 def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
@@ -95,7 +95,7 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         }
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
-        logging.error(f"Error inserting range to Supabase: {e}")[cite: 1]
+        logging.error(f"Error inserting range to Supabase: {e}")
 
 
 def db_clear_managed_ranges():
@@ -104,7 +104,7 @@ def db_clear_managed_ranges():
     try:
         supabase.table("managed_ranges").delete().neq("id", 0).execute()
     except Exception as e:
-        logging.error(f"Error clearing ranges from Supabase: {e}")[cite: 1]
+        logging.error(f"Error clearing ranges from Supabase: {e}")
 
 
 # --- Comprehensive World Country & Flag Map ---
@@ -494,7 +494,7 @@ def get_main_keyboard():
         [KeyboardButton("📱 Get Number"), KeyboardButton("⚡ Active Engine")],
         [KeyboardButton("🌐 Live Feed"), KeyboardButton("🎁 Referrals")],
         [KeyboardButton("👤 My Profile"), KeyboardButton("🎧 Support Hub")],
-        [KeyboardButton("👤 Generate Names")],  # Added Name Generator button
+        [KeyboardButton("👤 Generate Names")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
