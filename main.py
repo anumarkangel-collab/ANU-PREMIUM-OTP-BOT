@@ -35,12 +35,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Initialize Supabase Client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None[cite: 7]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
-)
+)[cite: 7]
 
 # --- Global State ---
 active_allocations = {}
@@ -51,7 +51,7 @@ MAX_SEEN_SIZE = 5000
 DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
-]
+][cite: 7]
 
 
 # --- English Name Generator Datasets ---
@@ -59,13 +59,13 @@ ENGLISH_FIRST_NAMES = [
     "James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles",
     "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen",
     "Daniel", "Matthew", "Anthony", "Mark", "Donald", "Steven", "Paul", "Andrew", "Joshua", "Kenneth"
-]
+][cite: 7]
 
 ENGLISH_FATHER_NAMES = [
     "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Garcia", "Rodriguez", "Wilson",
     "Anderson", "Taylor", "Thomas", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White",
     "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King"
-]
+][cite: 7]
 
 
 # --- Database Helper Functions ---
@@ -80,7 +80,7 @@ def db_get_managed_ranges() -> list:
         return DEFAULT_RANGES
     except Exception as e:
         logging.error(f"Error fetching ranges from Supabase: {e}")
-        return DEFAULT_RANGES
+        return DEFAULT_RANGES[cite: 7]
 
 
 def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
@@ -95,7 +95,7 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         }
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
-        logging.error(f"Error inserting range to Supabase: {e}")
+        logging.error(f"Error inserting range to Supabase: {e}")[cite: 7]
 
 
 def db_clear_managed_ranges():
@@ -104,7 +104,7 @@ def db_clear_managed_ranges():
     try:
         supabase.table("managed_ranges").delete().neq("id", 0).execute()
     except Exception as e:
-        logging.error(f"Error clearing ranges from Supabase: {e}")
+        logging.error(f"Error clearing ranges from Supabase: {e}")[cite: 7]
 
 
 # --- Comprehensive World Country & Flag Map ---
@@ -313,7 +313,7 @@ COUNTRY_FLAG_MAP = {
     "tonga": ("Tonga", "🇹🇴"), "676": ("Tonga", "🇹🇴"),
     "tuvalu": ("Tuvalu", "🇹🇻"), "688": ("Tuvalu", "🇹🇻"),
     "vanuatu": ("Vanuatu", "🇻🇺"), "678": ("Vanuatu", "🇻🇺"),
-}
+}[cite: 7]
 
 
 def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tuple[str, str]:
@@ -321,7 +321,7 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     for key, (country_name, flag) in COUNTRY_FLAG_MAP.items():
         if key in combined:
             return country_name, flag
-    return country_text or "Unknown", "🌐"
+    return country_text or "Unknown", "🌐"[cite: 7]
 
 
 def mask_phone_number(phone: str) -> str:
@@ -330,12 +330,12 @@ def mask_phone_number(phone: str) -> str:
         prefix = digits[:3]
         suffix = digits[-4:]
         return f"+{prefix}****{suffix}"
-    return phone
+    return phone[cite: 7]
 
 
 def extract_code(message_text: str) -> str:
     match = re.search(r"\b\d{4,8}\b", message_text)
-    return match.group(0) if match else "No code found"
+    return match.group(0) if match else "No code found"[cite: 7]
 
 
 class ZebraSMSClient:
@@ -647,8 +647,9 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             row = res["data"]["rows"][0]
             allocated_num = row.get("number")
             
-            res_country = row.get("country") or c_name
-            final_country_name, final_flag = auto_detect_country_and_flag(res_country, allocated_num)
+            # Force it to use the country and flag you saved in your database for this range
+            final_country_name = matched_item.get("country", c_name)
+            final_flag = matched_item.get("flag", flag_icon)
 
             active_allocations[allocated_num] = {
                 "chat_id": chat_id,
