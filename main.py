@@ -4,8 +4,6 @@ import os
 import random
 import re
 import httpx
-import pandas as pd
-from threading import Thread
 from keep_alive import keep_alive
 from supabase import create_client, Client
 from telegram import (
@@ -37,7 +35,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Initialize Supabase Client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None[cite: 1]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -53,67 +51,24 @@ MAX_SEEN_SIZE = 5000
 DEFAULT_RANGES = [
     {"service": "Facebook", "country": "Cambodia", "flag": "🇰🇭", "range": "85531879XXX"},
     {"service": "Telegram", "country": "Ivory Coast", "flag": "🇨🇮", "range": "22501XXX"},
+][cite: 1]
+
+
+# --- English Name Generator Datasets ---
+ENGLISH_FIRST_NAMES = [
+    "James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles",
+    "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen",
+    "Daniel", "Matthew", "Anthony", "Mark", "Donald", "Steven", "Paul", "Andrew", "Joshua", "Kenneth"
 ]
 
-# --- Load Names from Excel (Non-blocking background initialization) ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_PATH = os.path.join(BASE_DIR, "name.xlsx")
-
-MALE_NAMES = []
-FEMALE_NAMES = []
-
-def load_names_background():
-    global MALE_NAMES, FEMALE_NAMES
-    try:
-        if os.path.exists(EXCEL_PATH):
-            df = pd.read_excel(EXCEL_PATH)
-            # Ensure proper string stripping and column name cleaning
-            df.columns = [c.strip() for c in df.columns]
-            
-            if "First Name" in df.columns and "Last Name" in df.columns and "Gender" in df.columns:
-                df["Gender"] = df["Gender"].astype(str).str.strip().str.lower()
-                df["Full_Name"] = df["First Name"].astype(str).str.strip() + " " + df["Last Name"].astype(str).str.strip()
-                
-                male_df = df[df["Gender"] == "male"]
-                female_df = df[df["Gender"] == "female"]
-                
-                MALE_NAMES = male_df["Full_Name"].dropna().tolist()
-                FEMALE_NAMES = female_df["Full_Name"].dropna().tolist()
-                logging.info(f"Loaded {len(MALE_NAMES)} male names and {len(FEMALE_NAMES)} female names successfully from name.xlsx.")
-            else:
-                logging.error("Excel columns 'First Name', 'Last Name', or 'Gender' not found in name.xlsx")
-        else:
-            logging.warning(f"Excel file not found at: {EXCEL_PATH}")
-    except Exception as e:
-        logging.error(f"Failed to load names from Excel: {e}")
-
-# Start background thread immediately so port binding isn't delayed
-Thread(target=load_names_background, daemon=True).start()
+ENGLISH_FATHER_NAMES = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Garcia", "Rodriguez", "Wilson",
+    "Anderson", "Taylor", "Thomas", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White",
+    "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King"
+]
 
 
 # --- Database Helper Functions ---
-
-def db_add_user(user_id: int):
-    """Save active users for admin broadcasting."""
-    if not supabase:
-        return
-    try:
-        supabase.table("users").upsert({"user_id": user_id}, on_conflict="user_id").execute()
-    except Exception as e:
-        logging.error(f"Error saving user to Supabase: {e}")
-
-
-def db_get_all_users() -> list:
-    """Retrieve all user IDs for broadcasting."""
-    if not supabase:
-        return []
-    try:
-        response = supabase.table("users").select("user_id").execute()
-        return [row["user_id"] for row in response.data] if response.data else []
-    except Exception as e:
-        logging.error(f"Error fetching users for broadcast: {e}")
-        return []
-
 
 def db_get_managed_ranges() -> list:
     if not supabase:
@@ -125,7 +80,7 @@ def db_get_managed_ranges() -> list:
         return DEFAULT_RANGES
     except Exception as e:
         logging.error(f"Error fetching ranges from Supabase: {e}")
-        return DEFAULT_RANGES
+        return DEFAULT_RANGES[cite: 1]
 
 
 def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
@@ -140,16 +95,7 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         }
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
-        logging.error(f"Error inserting range to Supabase: {e}")
-
-
-def db_delete_specific_range(range_val: str):
-    if not supabase:
-        return
-    try:
-        supabase.table("managed_ranges").delete().eq("range", range_val).execute()
-    except Exception as e:
-        logging.error(f"Error deleting range from Supabase: {e}")
+        logging.error(f"Error inserting range to Supabase: {e}")[cite: 1]
 
 
 def db_clear_managed_ranges():
@@ -158,7 +104,7 @@ def db_clear_managed_ranges():
     try:
         supabase.table("managed_ranges").delete().neq("id", 0).execute()
     except Exception as e:
-        logging.error(f"Error clearing ranges from Supabase: {e}")
+        logging.error(f"Error clearing ranges from Supabase: {e}")[cite: 1]
 
 
 # --- Comprehensive World Country & Flag Map ---
@@ -371,24 +317,11 @@ COUNTRY_FLAG_MAP = {
 
 
 def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tuple[str, str]:
-    text_clean = (country_text or "").strip().lower()
-    digits_only = re.sub(r"\D", "", phone_or_range or "")
-
-    for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
-        if not key.isdigit() and key == text_clean:
-            return c_name, flag
-
-    numeric_keys = sorted(
-        [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
-        key=len,
-        reverse=True
-    )
-    
-    for prefix in numeric_keys:
-        if digits_only.startswith(prefix):
-            return COUNTRY_FLAG_MAP[prefix]
-
-    return country_text if country_text else "Unknown", "🌐"
+    combined = (country_text + " " + phone_or_range).lower()
+    for key, (country_name, flag) in COUNTRY_FLAG_MAP.items():
+        if key in combined:
+            return country_name, flag
+    return country_text or "Unknown", "🌐"
 
 
 def mask_phone_number(phone: str) -> str:
@@ -503,10 +436,11 @@ async def auto_check_updates(app):
                     rows = res.get("data", {}).get("rows", [])
                     for row in rows:
                         target_number = row.get("number")
+                        timestamp = row.get("at_ms")
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        msg_id = f"{target_number}_{msg_text}"
+                        msg_id = f"{target_number}_{timestamp}_{msg_text}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
                             seen_messages.clear()
@@ -527,14 +461,11 @@ async def auto_check_updates(app):
                                 f"👤 *Sender:* `{sender}`\n"
                                 f"🔑 *Code:* `{code}`"
                             )
-                            try:
-                                await app.bot.send_message(
-                                    chat_id=user_chat_id,
-                                    text=dm_text,
-                                    parse_mode="Markdown",
-                                )
-                            except Exception as e:
-                                logging.error(f"Error sending DM to {user_chat_id}: {e}")
+                            await app.bot.send_message(
+                                chat_id=user_chat_id,
+                                text=dm_text,
+                                parse_mode="Markdown",
+                            )
 
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
@@ -560,10 +491,10 @@ async def auto_check_updates(app):
 
 def get_main_keyboard():
     keyboard = [
-        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("🏷️ Name Generate 🔤")],
-        [KeyboardButton("⚡ Active Engine ⚡"), KeyboardButton("🌐 Live Feed 🔵")],
-        [KeyboardButton("🎁 Referrals 🟡"), KeyboardButton("👤 My Profile 🟣")],
-        [KeyboardButton("🎧 Support Hub 🔴")],
+        [KeyboardButton("📱 Get Number"), KeyboardButton("⚡ Active Engine")],
+        [KeyboardButton("🌐 Live Feed"), KeyboardButton("🎁 Referrals")],
+        [KeyboardButton("👤 My Profile"), KeyboardButton("🎧 Support Hub")],
+        [KeyboardButton("👤 Generate Names")],  # Added Name Generator button
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -587,17 +518,13 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_msg = (
         f"🛠 **Admin Configuration Panel** 🛠\n\n"
         f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add, delete, or broadcast messages:*"
+        f"👇 *Click below to add or manage ranges:*"
     )
 
     keyboard = [
         [
-            InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add"),
-            InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select"),
-        ],
-        [
-            InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast"),
-            InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear"),
+            InlineKeyboardButton("➕ Add Range", callback_data="admin_add"),
+            InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear"),
         ]
     ]
 
@@ -618,117 +545,40 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "admin_add":
         await query.answer()
         context.user_data["waiting_for_range"] = True
-        context.user_data["waiting_for_broadcast"] = False
         await query.message.reply_text(
             "✍ **Send the configuration in this format:**\n\n"
             "`Service | Country | Range`\n\n"
             "👉 *Example:* `Facebook | Cambodia | 85531879XXX`",
             parse_mode="Markdown",
         )
-    elif data == "admin_delete_select":
-        await query.answer()
-        managed_ranges = db_get_managed_ranges()
-        if not managed_ranges:
-            await query.edit_message_text("❌ No active ranges found to delete.")
-            return
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    f"❌ Delete {r['flag']} {r['service']} ({r['range']}) 🔴",
-                    callback_data=f"admin_del_{r['range']}"
-                )
-            ]
-            for r in managed_ranges
-        ]
-        keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back")])
-
-        await query.edit_message_text(
-            "🗑 **Select a specific range to delete:**",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif data.startswith("admin_del_"):
-        range_to_del = data.replace("admin_del_", "")
-        db_delete_specific_range(range_to_del)
-        await query.answer(f"Deleted range {range_to_del}", show_alert=True)
-        await query.edit_message_text(f"✅ **Range `{range_to_del}` deleted successfully.**", parse_mode="Markdown")
-
-    elif data == "admin_broadcast":
-        await query.answer()
-        context.user_data["waiting_for_broadcast"] = True
-        context.user_data["waiting_for_range"] = False
-        await query.message.reply_text(
-            "📢 **Send the message text you wish to broadcast to all bot users:**",
-            parse_mode="Markdown"
-        )
-
     elif data == "admin_clear":
         db_clear_managed_ranges()
         await query.answer("All ranges cleared from database!", show_alert=True)
         await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
 
 
-async def name_generate_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def name_generator_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
-    chat_id = query.message.chat_id
 
-    if data == "gen_menu":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-        ])
-        await query.edit_message_text("🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:", parse_mode="Markdown", reply_markup=keyboard)
-        return
+    if query.data == "gen_new_names":
+        first_name = random.choice(ENGLISH_FIRST_NAMES)
+        father_name = random.choice(ENGLISH_FATHER_NAMES)
+        copyable_block = f"{first_name} {father_name}"
 
-    if not MALE_NAMES and not FEMALE_NAMES:
-        await query.edit_message_text("❌ Name database is empty or file not found.")
-        return
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔄 Generate Another", callback_data="gen_new_names")]]
+        )
 
-    if data == "gen_male":
-        name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
-        text = f"👨 **Generated Male Name:**\n\n`{name}`"
-    elif data == "gen_female":
-        name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
-        text = f"👩 **Generated Female Name:**\n\n`{name}`"
-    elif data == "gen_pair":
-        m_name = random.choice(MALE_NAMES) if MALE_NAMES else "N/A"
-        f_name = random.choice(FEMALE_NAMES) if FEMALE_NAMES else "N/A"
-        text = f"🏷️ **Generated Names:**\n\n👨 Male / Father Name: `{m_name}`\n👩 Female Name: `{f_name}`"
-    else:
-        return
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔄 Generate Another 🔤", callback_data=data),
-        ],
-        [
-            InlineKeyboardButton("🔙 Back to Options 🔙", callback_data="gen_menu")
-        ]
-    ])
-
-    try:
-        await query.message.delete()
-    except Exception as e:
-        logging.warning(f"Could not delete previous name message: {e}")
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-
-async def name_menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-        [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-    ])
-    await query.edit_message_text("🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:", parse_mode="Markdown", reply_markup=keyboard)
+        await query.edit_message_text(
+            text=f"🔤 **Generated English Names:**\n\n"
+                 f"First Name: `{first_name}`\n"
+                 f"Father's Name: `{father_name}`\n\n"
+                 f"Full Name:\n`{copyable_block}`\n\n"
+                 f"*(Tap code blocks above to copy)*",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
 
 
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -737,20 +587,6 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
     chat_id = query.message.chat_id
     managed_ranges = db_get_managed_ranges()
 
-    if data == "srv_menu":
-        await query.answer()
-        services = sorted(list(set(r["service"] for r in managed_ranges)))
-        keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
-            for srv in services
-        ]
-        await query.edit_message_text(
-            "🛠 **Select a Service:**",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-        return
-
     if data.startswith("srv_"):
         selected_service = data.replace("srv_", "")
         matching_ranges = [r for r in managed_ranges if r["service"] == selected_service]
@@ -758,13 +594,12 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"{r['flag']} {r['country']} ({r['range']}) 🔵",
+                    f"{r['flag']} {r['country']} ({r['range']})",
                     callback_data=f"prov_{r['range']}",
                 )
             ]
             for r in matching_ranges
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")])
 
         await query.edit_message_text(
             f"🛠 **Selected Service:** `{selected_service}`\n\n"
@@ -807,9 +642,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             row = res["data"]["rows"][0]
             allocated_num = row.get("number")
             
-            api_country = row.get("country")
-            target_country = api_country if api_country else matched_item.get("country", c_name)
-            final_country_name, final_flag = auto_detect_country_and_flag(target_country, allocated_num)
+            res_country = row.get("country") or c_name
+            final_country_name, final_flag = auto_detect_country_and_flag(res_country, allocated_num)
 
             active_allocations[allocated_num] = {
                 "chat_id": chat_id,
@@ -825,9 +659,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
-                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
-                    [InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]
+                    [InlineKeyboardButton("🔄 Change Number", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)],
                 ]
             )
 
@@ -843,19 +676,14 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             err_msg = res.get("message") or meta.get("error") or "Unknown error"
             msg = f"❌ **Failed to allocate number:**\nStatus Code: {meta.get('code')}\nDetails: {err_msg}"
             
-            back_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Services 🔙", callback_data="srv_menu")]])
-
             if is_change_request:
-                await loading_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
+                await loading_msg.edit_text(msg, parse_mode="Markdown")
             else:
-                await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=back_keyboard)
+                await query.edit_message_text(msg, parse_mode="Markdown")
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     user_name = update.effective_user.first_name or "User"
-    
-    db_add_user(user_id)
     
     welcome_msg = (
         f"👋 *ANU PREMIUM OTP BOT*\n\n"
@@ -871,8 +699,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
 
-    db_add_user(user_chat_id)
-
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
@@ -886,6 +712,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
+        # Save directly to Supabase database
         db_add_managed_range(service, c_name, detected_flag, range_val)
         
         context.user_data["waiting_for_range"] = False
@@ -900,31 +727,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if context.user_data.get("waiting_for_broadcast"):
-        context.user_data["waiting_for_broadcast"] = False
-        all_users = db_get_all_users()
-        
-        if not all_users:
-            all_users = [user_chat_id]
-
-        status_msg = await update.message.reply_text(f"⏳ Sending broadcast message to {len(all_users)} users...")
-        
-        success, failed = 0, 0
-        for uid in all_users:
-            try:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text=f"📢 **ANNOUNCEMENT** 📢\n\n{text}",
-                    parse_mode="Markdown"
-                )
-                success += 1
-            except Exception as e:
-                failed += 1
-                logging.error(f"Failed to broadcast to {uid}: {e}")
-
-        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
-        return
-
     if "Get Number" in text:
         managed_ranges = db_get_managed_ranges()
 
@@ -937,101 +739,116 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
+            [InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")]
             for srv in services
         ]
+
         await update.message.reply_text(
             "🛠 **Select a Service:**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
-        return
 
-    if "Name Generate" in text:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👨 Male Name", callback_data="gen_male"), InlineKeyboardButton("👩 Female Name", callback_data="gen_female")],
-            [InlineKeyboardButton("🎲 Generate Both (Father & Name)", callback_data="gen_pair")]
-        ])
+    elif "Active Engine" in text:
+        await update.message.reply_text("⏳ Fetching active delivery engines...")
+        res = await zebra.get_live_access()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "⚡ **Zebra Active Delivery Engines:**\n\n" + "\n".join(
+                [f"• 👤 **Sender:** `{r.get('sender')}` | **Ranges:** {', '.join([f'`{x}`' for x in r.get('ranges', [])])}" for r in rows[:10]]
+            ) if rows else "🔍 No active engines found right now."
+        else:
+            reply = f"❌ Error checking active engines: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Live Feed" in text:
+        await update.message.reply_text("⏳ Fetching live delivered SMS feeds...")
+        res = await zebra.get_updates()
+        meta = res.get("meta", {})
+
+        if meta.get("code") == 0:
+            rows = res.get("data", {}).get("rows", [])
+            reply = "🌐 **Live Updates Feed (Recent 5):**\n\n" + "\n\n".join(
+                [f"• 📱 `{mask_phone_number(r.get('number'))}` | 👤 `{r.get('sender')}`\n  💬 `{r.get('message')}`" for r in rows[:5]]
+            ) if rows else "📭 No live updates received recently."
+        else:
+            reply = f"❌ Error fetching feed: {meta.get('error')}"
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
+    elif "Referrals" in text:
+        bot_username = (await context.bot.get_me()).username
         await update.message.reply_text(
-            "🏷️ **Name Generator Hub**\n\nSelect a category below. Names will be provided in copyable format:",
+            f"🎁 **Referral System**\n\n"
+            f"Share your referral link with friends:\n🔗 `https://t.me/{bot_username}?start={user_chat_id}`",
+            parse_mode="Markdown",
+        )
+
+    elif "My Profile" in text:
+        user_nums = [n for n, info in active_allocations.items() if info["chat_id"] == user_chat_id]
+        nums_text = "\n".join([f"• `{num}`" for num in user_nums]) if user_nums else "None"
+        await update.message.reply_text(
+            f"👤 **User Profile**\n\n"
+            f"🆔 **Telegram ID:** `{user_chat_id}`\n"
+            f"📱 **Active Numbers:**\n{nums_text}",
+            parse_mode="Markdown",
+        )
+
+    elif "Support Hub" in text:
+        await update.message.reply_text(
+            f"🎧 **Support Hub**\n\nContact support agent directly {SUPPORT_USERNAME}",
+            parse_mode="Markdown",
+        )
+
+    elif "Generate Names" in text:
+        first_name = random.choice(ENGLISH_FIRST_NAMES)
+        father_name = random.choice(ENGLISH_FATHER_NAMES)
+        copyable_block = f"{first_name} {father_name}"
+
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔄 Generate Another", callback_data="gen_new_names")]]
+        )
+
+        await update.message.reply_text(
+            f"🔤 **Generated English Names:**\n\n"
+            f"First Name: `{first_name}`\n"
+            f"Father's Name: `{father_name}`\n\n"
+            f"Full Name:\n`{copyable_block}`\n\n"
+            f"*(Tap code blocks above to copy)*",
             parse_mode="Markdown",
             reply_markup=keyboard,
         )
-        return
-
-    if "Active Engine" in text:
-        count = len(active_allocations)
-        await update.message.reply_text(
-            f"⚡ **Active Engine Status**\n\n"
-            f"• Currently Active Allocations: `{count}`\n"
-            f"• Background Polling: `Running (24/7)`",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(),
-        )
-        return
-
-    if "Live Feed" in text:
-        res = await zebra.get_live_access()
-        meta = res.get("meta", {})
-        if meta.get("code") == 0:
-            rows = res.get("data", {}).get("rows", [])[:5]
-            if not rows:
-                feed_text = "🌐 No recent messages found in live feed."
-            else:
-                feed_text = "🌐 **Recent Live SMS Feed:**\n\n"
-                for r in rows:
-                    num = mask_phone_number(r.get("number", ""))
-                    sender = r.get("sender", "Unknown")
-                    msg = r.get("message", "")
-                    feed_text += f"📱 `{num}` | 👤 `{sender}`\n💬 `{msg}`\n\n"
-        else:
-            feed_text = "❌ Failed to fetch live feed from ZebraSMS API."
-
-        await update.message.reply_text(feed_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
-        return
-
-    if "Referrals" in text:
-        bot_user = (await context.bot.get_me()).username
-        ref_link = f"https://t.me/{bot_user}?start=ref_{user_chat_id}"
-        await update.message.reply_text(
-            f"🎁 **Referral Program**\n\n"
-            f"Invite your friends and earn rewards!\n\n"
-            f"🔗 Your Invite Link:\n`{ref_link}`",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(),
-        )
-        return
-
-    if "My Profile" in text:
-        await update.message.reply_text(
-            f"👤 **User Profile**\n\n"
-            f"• Telegram ID: `{user_chat_id}`\n"
-            f"• Status: `Active / Verified`",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(),
-        )
-        return
-
-    if "Support Hub" in text:
-        await update.message.reply_text(
-            f"🎧 **Support Hub**\n\n"
-            f"Need assistance or have issues? Contact our support team directly: {SUPPORT_USERNAME}",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard(),
-        )
-        return
 
 
-def main():
-    if not TELEGRAM_BOT_TOKEN:
-        logging.error("TELEGRAM_BOT_TOKEN environment variable is not set!")
-        return
+async def post_init(application):
+    application.create_task(auto_check_updates(application))
 
-    # Start keep_alive server for uptime hosting (Render/Replit)
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
     keep_alive()
+    print("Keep-alive HTTP server started.")
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
-    # Command Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("test_sms", cmd_test_sms))
+
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+    app.add_handler(CallbackQueryHandler(name_generator_callback_handler, pattern="^gen_new_names$"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+
+    print("🤖 Bot running...")
+    app.run_polling()
