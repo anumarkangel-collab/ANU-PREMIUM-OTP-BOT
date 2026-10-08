@@ -440,7 +440,7 @@ async def auto_check_updates(app):
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        msg_id = f"{target_number}_{timestamp}_{msg_text}"
+                        msg_id = f"{target_number}_{timestamp}_{hash(msg_text)}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
                             seen_messages.clear()
