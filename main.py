@@ -55,28 +55,6 @@ DEFAULT_RANGES = [
 
 # --- Database Helper Functions ---
 
-def db_add_user(user_id: int):
-    """Save active users for admin broadcasting."""
-    if not supabase:
-        return
-    try:
-        supabase.table("users").upsert({"user_id": user_id}, on_conflict="user_id").execute()
-    except Exception as e:
-        logging.error(f"Error saving user to Supabase: {e}")
-
-
-def db_get_all_users() -> list:
-    """Retrieve all user IDs for broadcasting."""
-    if not supabase:
-        return []
-    try:
-        response = supabase.table("users").select("user_id").execute()
-        return [row["user_id"] for row in response.data] if response.data else []
-    except Exception as e:
-        logging.error(f"Error fetching users for broadcast: {e}")
-        return []
-
-
 def db_get_managed_ranges() -> list:
     if not supabase:
         return DEFAULT_RANGES
@@ -103,15 +81,6 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
         logging.error(f"Error inserting range to Supabase: {e}")
-
-
-def db_delete_specific_range(range_val: str):
-    if not supabase:
-        return
-    try:
-        supabase.table("managed_ranges").delete().eq("range", range_val).execute()
-    except Exception as e:
-        logging.error(f"Error deleting range from Supabase: {e}")
 
 
 def db_clear_managed_ranges():
@@ -333,27 +302,11 @@ COUNTRY_FLAG_MAP = {
 
 
 def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tuple[str, str]:
-    text_clean = (country_text or "").strip().lower()
-    digits_only = re.sub(r"\D", "", phone_or_range or "")
-
-    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
-    for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
-        if not key.isdigit() and key == text_clean:
-            return c_name, flag
-
-    # 2. Second Priority: Match exact calling prefix at the START of digits_only
-    numeric_keys = sorted(
-        [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
-        key=len,
-        reverse=True
-    )
-    
-    for prefix in numeric_keys:
-        if digits_only.startswith(prefix):
-            return COUNTRY_FLAG_MAP[prefix]
-
-    # 3. Fallback
-    return country_text if country_text else "Unknown", "🌐"
+    combined = (country_text + " " + phone_or_range).lower()
+    for key, (country_name, flag) in COUNTRY_FLAG_MAP.items():
+        if key in combined:
+            return country_name, flag
+    return country_text or "Unknown", "🌐"
 
 
 def mask_phone_number(phone: str) -> str:
@@ -421,20 +374,6 @@ class ZebraSMSClient:
 zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 
-async def request_multiple_numbers(range_val: str, count: int = 2):
-    """Utility function to request multiple numbers sequentially."""
-    allocated = []
-    for _ in range(count):
-        res = await zebra.get_number(range_val)
-        meta = res.get("meta", {})
-        if meta.get("code") == 0:
-            row = res["data"]["rows"][0]
-            allocated.append(row.get("number"))
-        # Brief pause between requests to prevent API rate limits
-        await asyncio.sleep(0.5)
-    return allocated
-
-
 async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dummy_number = "+237628503546"
     dummy_sender = "FACEBOOK"
@@ -482,10 +421,11 @@ async def auto_check_updates(app):
                     rows = res.get("data", {}).get("rows", [])
                     for row in rows:
                         target_number = row.get("number")
+                        timestamp = row.get("at_ms")
                         msg_text = row.get("message")
                         sender = row.get("sender")
 
-                        msg_id = f"{target_number}_{msg_text}"
+                        msg_id = f"{target_number}_{timestamp}_{msg_text}"
 
                         if len(seen_messages) > MAX_SEEN_SIZE:
                             seen_messages.clear()
@@ -506,14 +446,11 @@ async def auto_check_updates(app):
                                 f"👤 *Sender:* `{sender}`\n"
                                 f"🔑 *Code:* `{code}`"
                             )
-                            try:
-                                await app.bot.send_message(
-                                    chat_id=user_chat_id,
-                                    text=dm_text,
-                                    parse_mode="Markdown",
-                                )
-                            except Exception as e:
-                                logging.error(f"Error sending DM to {user_chat_id}: {e}")
+                            await app.bot.send_message(
+                                chat_id=user_chat_id,
+                                text=dm_text,
+                                parse_mode="Markdown",
+                            )
 
                             if CHANNEL_CHAT_ID:
                                 channel_text = (
@@ -539,9 +476,9 @@ async def auto_check_updates(app):
 
 def get_main_keyboard():
     keyboard = [
-        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("⚡ Active Engine ⚡")],
-        [KeyboardButton("🌐 Live Feed 🔵"), KeyboardButton("🎁 Referrals 🟡")],
-        [KeyboardButton("👤 My Profile 🟣"), KeyboardButton("🎧 Support Hub 🔴")],
+        [KeyboardButton("📱 Get Number"), KeyboardButton("⚡ Active Engine")],
+        [KeyboardButton("🌐 Live Feed"), KeyboardButton("🎁 Referrals")],
+        [KeyboardButton("👤 My Profile"), KeyboardButton("🎧 Support Hub")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -565,17 +502,13 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_msg = (
         f"🛠 **Admin Configuration Panel** 🛠\n\n"
         f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add, delete, or broadcast messages:*"
+        f"👇 *Click below to add or manage ranges:*"
     )
 
     keyboard = [
         [
-            InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add"),
-            InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select"),
-        ],
-        [
-            InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast"),
-            InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear"),
+            InlineKeyboardButton("➕ Add Range", callback_data="admin_add"),
+            InlineKeyboardButton("🗑 Clear All", callback_data="admin_clear"),
         ]
     ]
 
@@ -596,51 +529,12 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "admin_add":
         await query.answer()
         context.user_data["waiting_for_range"] = True
-        context.user_data["waiting_for_broadcast"] = False
         await query.message.reply_text(
             "✍ **Send the configuration in this format:**\n\n"
             "`Service | Country | Range`\n\n"
             "👉 *Example:* `Facebook | Cambodia | 85531879XXX`",
             parse_mode="Markdown",
         )
-    elif data == "admin_delete_select":
-        await query.answer()
-        managed_ranges = db_get_managed_ranges()
-        if not managed_ranges:
-            await query.edit_message_text("❌ No active ranges found to delete.")
-            return
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    f"❌ Delete {r['flag']} {r['service']} ({r['range']}) 🔴",
-                    callback_data=f"admin_del_{r['range']}"
-                )
-            ]
-            for r in managed_ranges
-        ]
-        keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back")])
-
-        await query.edit_message_text(
-            "🗑 **Select a specific range to delete:**",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif data.startswith("admin_del_"):
-        range_to_del = data.replace("admin_del_", "")
-        db_delete_specific_range(range_to_del)
-        await query.answer(f"Deleted range {range_to_del}", show_alert=True)
-        await query.edit_message_text(f"✅ **Range `{range_to_del}` deleted successfully.**", parse_mode="Markdown")
-
-    elif data == "admin_broadcast":
-        await query.answer()
-        context.user_data["waiting_for_broadcast"] = True
-        context.user_data["waiting_for_range"] = False
-        await query.message.reply_text(
-            "📢 **Send the message text you wish to broadcast to all bot users:**",
-            parse_mode="Markdown"
-        )
-
     elif data == "admin_clear":
         db_clear_managed_ranges()
         await query.answer("All ranges cleared from database!", show_alert=True)
@@ -660,7 +554,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"{r['flag']} {r['country']} ({r['range']}) 🔵",
+                    f"{r['flag']} {r['country']} ({r['range']})",
                     callback_data=f"prov_{r['range']}",
                 )
             ]
@@ -708,9 +602,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             row = res["data"]["rows"][0]
             allocated_num = row.get("number")
             
-            api_country = row.get("country")
-            target_country = api_country if api_country else matched_item.get("country", c_name)
-            final_country_name, final_flag = auto_detect_country_and_flag(target_country, allocated_num)
+            res_country = row.get("country") or c_name
+            final_country_name, final_flag = auto_detect_country_and_flag(res_country, allocated_num)
 
             active_allocations[allocated_num] = {
                 "chat_id": chat_id,
@@ -726,8 +619,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
-                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
+                    [InlineKeyboardButton("🔄 Change Number", callback_data=f"change_{selected_range}")],
+                    [InlineKeyboardButton("📢 Open OTP Channel", url=CHANNEL_URL)],
                 ]
             )
 
@@ -750,10 +643,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     user_name = update.effective_user.first_name or "User"
-    
-    db_add_user(user_id)
     
     welcome_msg = (
         f"👋 *ANU PREMIUM OTP BOT*\n\n"
@@ -769,8 +659,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
 
-    db_add_user(user_chat_id)
-
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
             await update.message.reply_text(
@@ -784,6 +672,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
+        # Save directly to Supabase database
         db_add_managed_range(service, c_name, detected_flag, range_val)
         
         context.user_data["waiting_for_range"] = False
@@ -798,44 +687,19 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if context.user_data.get("waiting_for_broadcast"):
-        context.user_data["waiting_for_broadcast"] = False
-        all_users = db_get_all_users()
-        
-        if not all_users:
-            all_users = [user_chat_id]
-
-        status_msg = await update.message.reply_text(f"⏳ Sending broadcast message to {len(all_users)} users...")
-        
-        success, failed = 0, 0
-        for uid in all_users:
-            try:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text=f"📢 **ANNOUNCEMENT** 📢\n\n{text}",
-                    parse_mode="Markdown"
-                )
-                success += 1
-            except Exception as e:
-                failed += 1
-                logging.error(f"Failed to broadcast to {uid}: {e}")
-
-        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
-        return
-
     if "Get Number" in text:
         managed_ranges = db_get_managed_ranges()
 
         if not managed_ranges:
             await update.message.reply_text(
-                "⚠ No ranges configured yet. An admin must configure ranges via `/admin`.",
+                "⚠️ No ranges configured yet. An admin must configure ranges via `/admin`.",
                 reply_markup=get_main_keyboard(),
             )
             return
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
+            [InlineKeyboardButton(f"🛡️ {srv}", callback_data=f"srv_{srv}")]
             for srv in services
         ]
 
