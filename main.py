@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import re
+import random
+import pyotp
 import httpx
 from keep_alive import keep_alive
 from supabase import create_client, Client
@@ -45,6 +47,12 @@ logging.basicConfig(
 active_allocations = {}
 seen_messages = set()
 MAX_SEEN_SIZE = 5000
+
+# Fake OTP Generator State & Settings
+fake_otp_settings = {
+    "enabled": False,
+    "interval": 15,
+}
 
 # Fallback default ranges if database is empty
 DEFAULT_RANGES = [
@@ -355,10 +363,11 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
 
 def mask_phone_number(phone: str) -> str:
     digits = re.sub(r"\D", "", phone)
-    if len(digits) >= 8:
-        prefix = digits[:3]
-        suffix = digits[-4:]
-        return f"+{prefix}****{suffix}"
+    if len(digits) >= 9:
+        # Example format requested: 251935ANU12
+        return f"{digits[:3]}{digits[3:6]}ANU{digits[-2:]}"
+    elif len(digits) >= 6:
+        return f"{digits[:3]}ANU{digits[-2:]}"
     return phone
 
 
@@ -455,11 +464,21 @@ async def cmd_test_sms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👤 *Sender:* `{dummy_sender}`\n"
             f"💬 *Full Message:* `{dummy_message}`"
         )
+        channel_keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"📋 Copy OTP: {code}", callback_data=f"copy_otp_{code}", style="success"),
+                InlineKeyboardButton("🤖 Bot", url="https://t.me/anupremiumotp_bot", style="primary")
+            ],
+            [
+                InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/anstans", style="primary")
+            ]
+        ])
         try:
             await context.bot.send_message(
                 chat_id=CHANNEL_CHAT_ID,
                 text=channel_text,
                 parse_mode="Markdown",
+                reply_markup=channel_keyboard,
             )
             await update.message.reply_text("✅ Test message successfully sent to Channel!")
         except Exception as err:
@@ -518,11 +537,21 @@ async def auto_check_updates(app):
                                     f"👤 *Sender:* `{sender}`\n"
                                     f"💬 *Full Message:* `{msg_text}`"
                                 )
+                                channel_keyboard = InlineKeyboardMarkup([
+                                    [
+                                        InlineKeyboardButton(f"📋 Copy OTP: {code}", callback_data=f"copy_otp_{code}", style="success"),
+                                        InlineKeyboardButton("🤖 Bot", url="https://t.me/anupremiumotp_bot", style="primary")
+                                    ],
+                                    [
+                                        InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/anstans", style="primary")
+                                    ]
+                                ])
                                 try:
                                     await app.bot.send_message(
                                         chat_id=CHANNEL_CHAT_ID,
                                         text=channel_text,
                                         parse_mode="Markdown",
+                                        reply_markup=channel_keyboard,
                                     )
                                 except Exception as err:
                                     logging.error(f"Failed to post to channel: {err}")
@@ -532,12 +561,60 @@ async def auto_check_updates(app):
         await asyncio.sleep(2)
 
 
+async def fake_sms_generator_loop(app):
+    """Background simulator loop pulling from database ranges to post fake SMS like real ones."""
+    while True:
+        try:
+            await asyncio.sleep(fake_otp_settings["interval"])
+            if fake_otp_settings["enabled"] and CHANNEL_CHAT_ID:
+                managed_ranges = db_get_managed_ranges()
+                chosen_range = random.choice(managed_ranges)
+                
+                app_name = chosen_range["service"].upper()
+                country_name = chosen_range["country"]
+                flag_icon = chosen_range["flag"]
+                range_prefix = re.sub(r"\D", "", chosen_range["range"])[:4]
+                
+                simulated_num = f"+{range_prefix}{''.join([str(random.randint(0, 9)) for _ in range(6)])}"
+                otp = str(random.randint(100000, 999999))
+                msg_text = f"{otp} is your {app_name} verification code."
+                masked_num = mask_phone_number(simulated_num)
+
+                channel_text = (
+                    "📢 *New SMS Received*\n\n"
+                    f"📱 *To Number:* `{masked_num}`\n"
+                    f"{flag_icon} *Country:* {country_name}\n"
+                    f"👤 *Sender:* `{app_name}`\n"
+                    f"💬 *Full Message:* `{msg_text}`"
+                )
+                channel_keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(f"📋 Copy OTP: {otp}", callback_data=f"copy_otp_{otp}", style="success"),
+                        InlineKeyboardButton("🤖 Bot", url="https://t.me/anupremiumotp_bot", style="primary")
+                    ],
+                    [
+                        InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/anstans", style="primary")
+                    ]
+                ])
+                try:
+                    await app.bot.send_message(
+                        chat_id=CHANNEL_CHAT_ID,
+                        text=channel_text,
+                        parse_mode="Markdown",
+                        reply_markup=channel_keyboard,
+                    )
+                except Exception as err:
+                    logging.error(f"Failed to post simulated SMS to channel: {err}")
+        except Exception as e:
+            logging.error(f"Error in fake SMS loop: {e}")
+
+
 def get_main_keyboard():
-    # Main reply keyboard with custom button styles ('success', 'primary', 'danger')
+    # Main reply keyboard with solid colored buttons and 2FA option
     keyboard = [
         [KeyboardButton("📱 Get Number 🟢", style="success"), KeyboardButton("⚡ Active Engine ⚡", style="primary")],
         [KeyboardButton("🌐 Live Feed 🔵", style="primary"), KeyboardButton("🎁 Referrals 🟡", style="success")],
-        [KeyboardButton("👤 My Profile 🟣", style="primary"), KeyboardButton("🎧 Support Hub 🔴", style="danger")],
+        [KeyboardButton("🔐 2FA Online 🟣", style="primary"), KeyboardButton("🎧 Support Hub 🔴", style="danger")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -558,10 +635,13 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ) or "No active ranges configured."
 
+    fake_status = "🟢 ON" if fake_otp_settings["enabled"] else "🔴 OFF"
+
     admin_msg = (
         f"🛠 **Admin Configuration Panel** 🛠\n\n"
+        f"🧪 **Fake SMS Simulation:** {fake_status} (Interval: {fake_otp_settings['interval']}s)\n\n"
         f"📋 **Current Active Ranges (Stored in Database):**\n{ranges_text}\n\n"
-        f"👇 *Click below to add, delete, or broadcast messages:*"
+        f"👇 *Click below to add, delete, or manage features:*"
     )
 
     # Inline buttons with colors (success, danger, primary)
@@ -571,7 +651,10 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select", style="danger"),
         ],
         [
+            InlineKeyboardButton("🧪 Toggle Fake SMS 🟠", callback_data="admin_toggle_fake", style="primary"),
             InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast", style="primary"),
+        ],
+        [
             InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear", style="danger"),
         ]
     ]
@@ -629,6 +712,12 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         db_delete_specific_range(range_to_del)
         await query.answer(f"Deleted range {range_to_del}", show_alert=True)
         await query.edit_message_text(f"✅ **Range `{range_to_del}` deleted successfully.**", parse_mode="Markdown")
+
+    elif data == "admin_toggle_fake":
+        fake_otp_settings["enabled"] = not fake_otp_settings["enabled"]
+        status_text = "Enabled 🟢" if fake_otp_settings["enabled"] else "Disabled 🔴"
+        await query.answer(f"Fake SMS Simulator is now {status_text}", show_alert=True)
+        await query.edit_message_text(f"🧪 **Fake SMS Simulation Status:** {status_text}")
 
     elif data == "admin_broadcast":
         await query.answer()
@@ -747,6 +836,30 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
             else:
                 await query.edit_message_text(msg, parse_mode="Markdown")
 
+    elif data.startswith("refresh_2fa_"):
+        secret = data.replace("refresh_2fa_", "")
+        await query.answer("Refreshing 2FA code...")
+        try:
+            totp = pyotp.TOTP(secret)
+            code = totp.now()
+            remaining = 30 - (int(asyncio.get_event_loop().time()) % 30)
+            
+            refresh_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh Code", callback_data=f"refresh_2fa_{secret}", style="success")]
+            ])
+            
+            await query.edit_message_text(
+                f"🔐 *Generated 2FA Code*\n\n🔑 Code: `{code}`\n⏳ Valid for ~{remaining}s",
+                parse_mode="Markdown",
+                reply_markup=refresh_keyboard
+            )
+        except Exception:
+            await query.edit_message_text("❌ Failed to refresh code. Secret key may be invalid.")
+
+    elif data.startswith("copy_otp_"):
+        otp_val = data.replace("copy_otp_", "")
+        await query.answer(f"OTP Copied: {otp_val}", show_alert=True)
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -769,6 +882,28 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     user_chat_id = update.effective_chat.id
 
     db_add_user(user_chat_id)
+
+    # 1. 2FA Secret Key Handler
+    if context.user_data.get("waiting_for_2fa"):
+        context.user_data["waiting_for_2fa"] = False
+        secret_key = text.strip().replace(" ", "")
+        try:
+            totp = pyotp.TOTP(secret_key)
+            code = totp.now()
+            remaining = 30 - (int(asyncio.get_event_loop().time()) % 30)
+            
+            refresh_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Refresh Code", callback_data=f"refresh_2fa_{secret_key}", style="success")]
+            ])
+            
+            await update.message.reply_text(
+                f"🔐 *Generated 2FA Code*\n\n🔑 Code: `{code}`\n⏳ Valid for ~{remaining}s",
+                parse_mode="Markdown",
+                reply_markup=refresh_keyboard
+            )
+        except Exception:
+            await update.message.reply_text("❌ Invalid 2FA secret key! Try again using the '2FA Online' button.", reply_markup=get_main_keyboard())
+        return
 
     if context.user_data.get("waiting_for_range"):
         if text.count("|") != 2:
@@ -889,8 +1024,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             f"👤 **User Profile**\n\n"
             f"🆔 **Telegram ID:** `{user_chat_id}`\n"
             f"📱 **Active Numbers:**\n{nums_text}",
+            parse_nomode=True,
             parse_mode="Markdown",
         )
+
+    elif "2FA Online" in text:
+        context.user_data["waiting_for_2fa"] = True
+        await update.message.reply_text("🔐 **Send your 2FA Secret Key below:**", parse_mode="Markdown")
 
     elif "Support Hub" in text:
         await update.message.reply_text(
@@ -901,6 +1041,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def post_init(application):
     application.create_task(auto_check_updates(application))
+    application.create_task(fake_sms_generator_loop(application))
 
 
 # --- Main Execution ---
@@ -921,9 +1062,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("test_sms", cmd_test_sms))
 
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
-    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_)"))
+    app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(srv_|prov_|change_|refresh_2fa_|copy_otp_)"))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
-    print("🤖 Bot running...")
+    print("🤖 Bot running with channel masking, copy OTP, and developer tags...")
     app.run_polling()
