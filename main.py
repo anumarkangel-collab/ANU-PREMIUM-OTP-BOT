@@ -336,12 +336,10 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
     text_clean = (country_text or "").strip().lower()
     digits_only = re.sub(r"\D", "", phone_or_range or "")
 
-    # 1. First Priority: Direct match on the text name (e.g. "ukraine")
     for key, (c_name, flag) in COUNTRY_FLAG_MAP.items():
         if not key.isdigit() and key == text_clean:
             return c_name, flag
 
-    # 2. Second Priority: Match exact calling prefix at the START of digits_only
     numeric_keys = sorted(
         [k for k in COUNTRY_FLAG_MAP.keys() if k.isdigit()],
         key=len,
@@ -352,7 +350,6 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
         if digits_only.startswith(prefix):
             return COUNTRY_FLAG_MAP[prefix]
 
-    # 3. Fallback
     return country_text if country_text else "Unknown", "🌐"
 
 
@@ -422,7 +419,6 @@ zebra = ZebraSMSClient(ZEBRA_API_KEY)
 
 
 async def request_multiple_numbers(range_val: str, count: int = 2):
-    """Utility function to request multiple numbers sequentially."""
     allocated = []
     for _ in range(count):
         res = await zebra.get_number(range_val)
@@ -430,7 +426,6 @@ async def request_multiple_numbers(range_val: str, count: int = 2):
         if meta.get("code") == 0:
             row = res["data"]["rows"][0]
             allocated.append(row.get("number"))
-        # Brief pause between requests to prevent API rate limits
         await asyncio.sleep(0.5)
     return allocated
 
@@ -538,10 +533,11 @@ async def auto_check_updates(app):
 
 
 def get_main_keyboard():
+    # Main reply keyboard with custom button styles ('success', 'primary', 'danger')
     keyboard = [
-        [KeyboardButton("📱 Get Number 🟢"), KeyboardButton("⚡ Active Engine ⚡")],
-        [KeyboardButton("🌐 Live Feed 🔵"), KeyboardButton("🎁 Referrals 🟡")],
-        [KeyboardButton("👤 My Profile 🟣"), KeyboardButton("🎧 Support Hub 🔴")],
+        [KeyboardButton("📱 Get Number 🟢", style="success"), KeyboardButton("⚡ Active Engine ⚡", style="primary")],
+        [KeyboardButton("🌐 Live Feed 🔵", style="primary"), KeyboardButton("🎁 Referrals 🟡", style="success")],
+        [KeyboardButton("👤 My Profile 🟣", style="primary"), KeyboardButton("🎧 Support Hub 🔴", style="danger")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -568,14 +564,15 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👇 *Click below to add, delete, or broadcast messages:*"
     )
 
+    # Inline buttons with colors (success, danger, primary)
     keyboard = [
         [
-            InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add"),
-            InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select"),
+            InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add", style="success"),
+            InlineKeyboardButton("🗑 Delete Range 🔴", callback_data="admin_delete_select", style="danger"),
         ],
         [
-            InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast"),
-            InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear"),
+            InlineKeyboardButton("📢 Broadcast Msg 🔵", callback_data="admin_broadcast", style="primary"),
+            InlineKeyboardButton("⚠️ Clear All Ranges 🟠", callback_data="admin_clear", style="danger"),
         ]
     ]
 
@@ -614,12 +611,13 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             [
                 InlineKeyboardButton(
                     f"❌ Delete {r['flag']} {r['service']} ({r['range']}) 🔴",
-                    callback_data=f"admin_del_{r['range']}"
+                    callback_data=f"admin_del_{r['range']}",
+                    style="danger"
                 )
             ]
             for r in managed_ranges
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back")])
+        keyboard.append([InlineKeyboardButton("🔙 Back 🟡", callback_data="admin_back", style="primary")])
 
         await query.edit_message_text(
             "🗑 **Select a specific range to delete:**",
@@ -662,6 +660,7 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
                 InlineKeyboardButton(
                     f"{r['flag']} {r['country']} ({r['range']}) 🔵",
                     callback_data=f"prov_{r['range']}",
+                    style="primary"
                 )
             ]
             for r in matching_ranges
@@ -726,8 +725,8 @@ async def user_provision_callback_handler(update: Update, context: ContextTypes.
 
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}")],
-                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL)],
+                    [InlineKeyboardButton("🔄 Change Number 🟠", callback_data=f"change_{selected_range}", style="danger")],
+                    [InlineKeyboardButton("📢 Open OTP Channel 🔵", url=CHANNEL_URL, style="primary")],
                 ]
             )
 
@@ -835,7 +834,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         services = sorted(list(set(r["service"] for r in managed_ranges)))
         keyboard = [
-            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}")]
+            [InlineKeyboardButton(f"🛡️ {srv} 🟢", callback_data=f"srv_{srv}", style="success")]
             for srv in services
         ]
 
