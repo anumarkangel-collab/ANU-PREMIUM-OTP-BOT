@@ -594,7 +594,7 @@ async def auto_check_updates(app):
                                                 ]
                                             ])
                                             try:
-                                                await context.bot.send_message(
+                                                await app.bot.send_message(
                                                     chat_id=CHANNEL_CHAT_ID,
                                                     text=channel_text,
                                                     parse_mode="Markdown",
@@ -668,7 +668,7 @@ async def auto_check_updates(app):
                                         ]
                                     ])
                                     try:
-                                        await context.bot.send_message(
+                                        await app.bot.send_message(
                                             chat_id=CHANNEL_CHAT_ID,
                                             text=channel_text,
                                             parse_mode="Markdown",
