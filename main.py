@@ -887,7 +887,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["waiting_for_broadcast"] = True
         context.user_data["waiting_for_range"] = None
         await query.message.reply_text(
-            "📢 **Send the message text you wish to broadcast to all bot users:**",
+            "📢 **Send the message (Text, Photo, Video, Audio, Document, or Voice) you wish to broadcast to all bot users:**",
             parse_mode="Markdown"
         )
 
@@ -1116,10 +1116,57 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
     user_chat_id = update.effective_chat.id
-
     db_add_user(user_chat_id)
+
+    if context.user_data.get("waiting_for_broadcast"):
+        context.user_data["waiting_for_broadcast"] = False
+        all_users = db_get_all_users()
+        
+        if not all_users:
+            all_users = [user_chat_id]
+
+        status_msg = await update.message.reply_text(f"⏳ Sending broadcast to {len(all_users)} users...")
+        
+        success, failed = 0, 0
+        for uid in all_users:
+            try:
+                if update.message.photo:
+                    file_id = update.message.photo[-1].file_id
+                    caption = update.message.caption_html or update.message.caption or ""
+                    await context.bot.send_photo(chat_id=uid, photo=file_id, caption=caption, parse_mode="HTML")
+                elif update.message.video:
+                    file_id = update.message.video.file_id
+                    caption = update.message.caption_html or update.message.caption or ""
+                    await context.bot.send_video(chat_id=uid, video=file_id, caption=caption, parse_mode="HTML")
+                elif update.message.audio:
+                    file_id = update.message.audio.file_id
+                    caption = update.message.caption_html or update.message.caption or ""
+                    await context.bot.send_audio(chat_id=uid, audio=file_id, caption=caption, parse_mode="HTML")
+                elif update.message.voice:
+                    file_id = update.message.voice.file_id
+                    caption = update.message.caption_html or update.message.caption or ""
+                    await context.bot.send_voice(chat_id=uid, voice=file_id, caption=caption, parse_mode="HTML")
+                elif update.message.document:
+                    file_id = update.message.document.file_id
+                    caption = update.message.caption_html or update.message.caption or ""
+                    await context.bot.send_document(chat_id=uid, document=file_id, caption=caption, parse_mode="HTML")
+                else:
+                    text_content = update.message.text_html or update.message.text or ""
+                    await context.bot.send_message(
+                        chat_id=uid,
+                        text=f"📢 **ANNOUNCEMENT** 📢\n\n{text_content}",
+                        parse_mode="Markdown"
+                    )
+                success += 1
+            except Exception as e:
+                failed += 1
+                logging.error(f"Failed to broadcast to {uid}: {e}")
+
+        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
+        return
+
+    text = update.message.text.strip() if update.message.text else ""
 
     if context.user_data.get("waiting_for_2fa"):
         context.user_data["waiting_for_2fa"] = False
@@ -1171,36 +1218,11 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if context.user_data.get("waiting_for_broadcast"):
-        context.user_data["waiting_for_broadcast"] = False
-        all_users = db_get_all_users()
-        
-        if not all_users:
-            all_users = [user_chat_id]
-
-        status_msg = await update.message.reply_text(f"⏳ Sending broadcast message to {len(all_users)} users...")
-        
-        success, failed = 0, 0
-        for uid in all_users:
-            try:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text=f"📢 **ANNOUNCEMENT** 📢\n\n{text}",
-                    parse_mode="Markdown"
-                )
-                success += 1
-            except Exception as e:
-                failed += 1
-                logging.error(f"Failed to broadcast to {uid}: {e}")
-
-        await status_msg.edit_text(f"✅ **Broadcast Completed!**\n\n Successful: `{success}`\n❌ Failed: `{failed}`", parse_mode="Markdown")
-        return
-
     if "Get Number" in text:
         keyboard = [
             [
-                InlineKeyboardButton("🟢 MK Network", callback_data="provider_mknetwork", style="success"),
-                InlineKeyboardButton("🦓 Zebra SMS", callback_data="provider_zebra", style="primary")
+                InlineKeyboardButton("🟢 ANU 🥺", callback_data="provider_mknetwork", style="success"),
+                InlineKeyboardButton("🦓 ANU 🤡", callback_data="provider_zebra", style="primary")
             ]
         ]
         await update.message.reply_text(
@@ -1227,7 +1249,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("⚡ Active delivery engines are online and ready.")
 
     elif "Live Feed" in text:
-        # Check MK Network active requests for this user
         user_mk_reqs = [req_id for req_id, info in active_allocations.items() if info.get("chat_id") == user_chat_id and info.get("provider") == "mknetwork"]
         
         mk_results_text = ""
@@ -1241,7 +1262,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                         [f"• 📱 `{mask_phone_number(r.get('number'))}` | 📌 Status: `{r.get('status')}`\n  🔑 Code: `{r.get('otp_code') or 'Waiting...'}`" for r in results]
                     )
 
-        # Check Zebra feed
         zebra_results_text = ""
         if zebra:
             res = await zebra.get_updates()
@@ -1313,7 +1333,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
     app.add_handler(CallbackQueryHandler(user_provision_callback_handler, pattern="^(provider_|back_to_providers|srv_|prov_|change_|refresh_2fa_|copy_otp_)"))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_text_messages))
 
     print("🤖 Bot running with combined MK Network and Zebra API integrations...")
     app.run_polling()
