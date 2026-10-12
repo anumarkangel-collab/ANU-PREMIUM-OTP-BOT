@@ -85,20 +85,20 @@ def db_get_all_users() -> list:
         return []
 
 
-def db_get_managed_ranges() -> list:
+def db_get_managed_ranges(provider: str = "zebra") -> list:
     if not supabase:
         return DEFAULT_RANGES
     try:
-        response = supabase.table("managed_ranges").select("*").execute()
+        response = supabase.table("managed_ranges").select("*").eq("provider", provider).execute()
         if response.data:
             return response.data
-        return DEFAULT_RANGES
+        return []
     except Exception as e:
         logging.error(f"Error fetching ranges from Supabase: {e}")
-        return DEFAULT_RANGES
+        return []
 
 
-def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
+def db_add_managed_range(service: str, country: str, flag: str, range_val: str, provider: str = "zebra"):
     if not supabase:
         return
     try:
@@ -107,6 +107,7 @@ def db_add_managed_range(service: str, country: str, flag: str, range_val: str):
             "country": country,
             "flag": flag,
             "range": range_val,
+            "provider": provider,
         }
         supabase.table("managed_ranges").upsert(data, on_conflict="range").execute()
     except Exception as e:
@@ -122,11 +123,11 @@ def db_delete_specific_range(range_val: str):
         logging.error(f"Error deleting range from Supabase: {e}")
 
 
-def db_clear_managed_ranges():
+def db_clear_managed_ranges(provider: str = "zebra"):
     if not supabase:
         return
     try:
-        supabase.table("managed_ranges").delete().neq("id", 0).execute()
+        supabase.table("managed_ranges").delete().eq("provider", provider).execute()
     except Exception as e:
         logging.error(f"Error clearing ranges from Supabase: {e}")
 
@@ -364,7 +365,6 @@ def auto_detect_country_and_flag(country_text: str, phone_or_range: str) -> tupl
 def mask_phone_number(phone: str) -> str:
     digits = re.sub(r"\D", "", phone)
     if len(digits) >= 9:
-        # Example format requested: 251935ANU12
         return f"{digits[:3]}{digits[3:6]}ANU{digits[-2:]}"
     elif len(digits) >= 6:
         return f"{digits[:3]}ANU{digits[-2:]}"
@@ -547,7 +547,7 @@ async def auto_check_updates(app):
                                     ]
                                 ])
                                 try:
-                                    await app.bot.send_message(
+                                    await context.bot.send_message(
                                         chat_id=CHANNEL_CHAT_ID,
                                         text=channel_text,
                                         parse_mode="Markdown",
@@ -567,50 +567,50 @@ async def fake_sms_generator_loop(app):
         try:
             await asyncio.sleep(fake_otp_settings["interval"])
             if fake_otp_settings["enabled"] and CHANNEL_CHAT_ID:
-                managed_ranges = db_get_managed_ranges()
-                chosen_range = random.choice(managed_ranges)
-                
-                app_name = chosen_range["service"].upper()
-                country_name = chosen_range["country"]
-                flag_icon = chosen_range["flag"]
-                range_prefix = re.sub(r"\D", "", chosen_range["range"])[:4]
-                
-                simulated_num = f"+{range_prefix}{''.join([str(random.randint(0, 9)) for _ in range(6)])}"
-                otp = str(random.randint(100000, 999999))
-                msg_text = f"{otp} is your {app_name} verification code."
-                masked_num = mask_phone_number(simulated_num)
+                managed_ranges = db_get_managed_ranges(provider="zebra")
+                if managed_ranges:
+                    chosen_range = random.choice(managed_ranges)
+                    
+                    app_name = chosen_range["service"].upper()
+                    country_name = chosen_range["country"]
+                    flag_icon = chosen_range["flag"]
+                    range_prefix = re.sub(r"\D", "", chosen_range["range"])[:4]
+                    
+                    simulated_num = f"+{range_prefix}{''.join([str(random.randint(0, 9)) for _ in range(6)])}"
+                    otp = str(random.randint(100000, 999999))
+                    msg_text = f"{otp} is your {app_name} verification code."
+                    masked_num = mask_phone_number(simulated_num)
 
-                channel_text = (
-                    "📢 *New SMS Received*\n\n"
-                    f"📱 *To Number:* `{masked_num}`\n"
-                    f"{flag_icon} *Country:* {country_name}\n"
-                    f"👤 *Sender:* `{app_name}`\n"
-                    f"💬 *Full Message:* `{msg_text}`"
-                )
-                channel_keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(f"📋 Copy OTP: {otp}", callback_data=f"copy_otp_{otp}", style="success"),
-                        InlineKeyboardButton("🤖 Bot", url="https://t.me/anupremiumotp_bot", style="primary")
-                    ],
-                    [
-                        InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/anstans", style="primary")
-                    ]
-                ])
-                try:
-                    await app.bot.send_message(
-                        chat_id=CHANNEL_CHAT_ID,
-                        text=channel_text,
-                        parse_mode="Markdown",
-                        reply_markup=channel_keyboard,
+                    channel_text = (
+                        "📢 *New SMS Received*\n\n"
+                        f"📱 *To Number:* `{masked_num}`\n"
+                        f"{flag_icon} *Country:* {country_name}\n"
+                        f"👤 *Sender:* `{app_name}`\n"
+                        f"💬 *Full Message:* `{msg_text}`"
                     )
-                except Exception as err:
-                    logging.error(f"Failed to post simulated SMS to channel: {err}")
+                    channel_keyboard = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(f"📋 Copy OTP: {otp}", callback_data=f"copy_otp_{otp}", style="success"),
+                            InlineKeyboardButton("🤖 Bot", url="https://t.me/anupremiumotp_bot", style="primary")
+                        ],
+                        [
+                            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/anstans", style="primary")
+                        ]
+                    ])
+                    try:
+                        await app.bot.send_message(
+                            chat_id=CHANNEL_CHAT_ID,
+                            text=channel_text,
+                            parse_mode="Markdown",
+                            reply_markup=channel_keyboard,
+                        )
+                    except Exception as err:
+                        logging.error(f"Failed to post simulated SMS to channel: {err}")
         except Exception as e:
             logging.error(f"Error in fake SMS loop: {e}")
 
 
 def get_main_keyboard():
-    # Main reply keyboard with solid colored buttons and 2FA option
     keyboard = [
         [KeyboardButton("📱 Get Number 🟢", style="success"), KeyboardButton("⚡ Active Engine ⚡", style="primary")],
         [KeyboardButton("🌐 Live Feed 🔵", style="primary"), KeyboardButton("🎁 Referrals 🟡", style="success")],
@@ -626,7 +626,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⛔ **Access Denied:** Your Telegram ID `{user_id}` is not configured as admin.", parse_mode="Markdown")
         return
 
-    managed_ranges = db_get_managed_ranges()
+    managed_ranges = db_get_managed_ranges(provider="zebra")
 
     ranges_text = "\n".join(
         [
@@ -644,7 +644,6 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👇 *Click below to add, delete, or manage features:*"
     )
 
-    # Inline buttons with colors (success, danger, primary)
     keyboard = [
         [
             InlineKeyboardButton("➕ Add Range 🟢", callback_data="admin_add", style="success"),
@@ -685,7 +684,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
     elif data == "admin_delete_select":
         await query.answer()
-        managed_ranges = db_get_managed_ranges()
+        managed_ranges = db_get_managed_ranges(provider="zebra")
         if not managed_ranges:
             await query.edit_message_text("❌ No active ranges found to delete.")
             return
@@ -729,16 +728,16 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
 
     elif data == "admin_clear":
-        db_clear_managed_ranges()
-        await query.answer("All ranges cleared from database!", show_alert=True)
-        await query.edit_message_text("🗑 **All configured ranges have been cleared from database.**")
+        db_clear_managed_ranges(provider="zebra")
+        await query.answer("All Zebra ranges cleared from database!", show_alert=True)
+        await query.edit_message_text("🗑 **All configured Zebra ranges have been cleared from database.**")
 
 
 async def user_provision_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
-    managed_ranges = db_get_managed_ranges()
+    managed_ranges = db_get_managed_ranges(provider="zebra")
 
     if data.startswith("srv_"):
         selected_service = data.replace("srv_", "")
@@ -883,7 +882,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     db_add_user(user_chat_id)
 
-    # 1. 2FA Secret Key Handler
     if context.user_data.get("waiting_for_2fa"):
         context.user_data["waiting_for_2fa"] = False
         secret_key = text.strip().replace(" ", "")
@@ -918,7 +916,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         service, country, range_val = parts[0], parts[1], parts[2]
         c_name, detected_flag = auto_detect_country_and_flag(country, range_val)
 
-        db_add_managed_range(service, c_name, detected_flag, range_val)
+        db_add_managed_range(service, c_name, detected_flag, range_val, provider="zebra")
         
         context.user_data["waiting_for_range"] = False
 
@@ -958,7 +956,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if "Get Number" in text:
-        managed_ranges = db_get_managed_ranges()
+        managed_ranges = db_get_managed_ranges(provider="zebra")
 
         if not managed_ranges:
             await update.message.reply_text(
@@ -1066,5 +1064,5 @@ if __name__ == "__main__":
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
-    print("🤖 Bot running with channel masking, copy OTP, and developer tags...")
+    print("🤖 Bot running with Zebra API integration and provider filtering...")
     app.run_polling()
